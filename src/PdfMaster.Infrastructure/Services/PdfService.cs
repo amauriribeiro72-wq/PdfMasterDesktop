@@ -295,7 +295,6 @@ public class PdfService : IPdfService
 
             output.Options.CompressContentStreams = true;
             output.Options.NoCompression = false;
-            output.Options.FlateEncodePageSegments = true;
 
             int total = input.PageCount;
             for (int i = 0; i < total; i++)
@@ -311,8 +310,7 @@ public class PdfService : IPdfService
                 output.Info.Author = "";
                 output.Info.Subject = "";
                 output.Info.Keywords = "";
-                output.Info.Creator = "";
-                output.Info.Producer = "PDF Master Pro";
+                try { output.Info.Creator = ""; } catch { }
             }
 
             SafeSaveDocument(output, destinationPath);
@@ -358,8 +356,8 @@ public class PdfService : IPdfService
             doc.Info.Author = "";
             doc.Info.Subject = "";
             doc.Info.Keywords = "";
-            doc.Info.Creator = "";
-            doc.Info.Producer = "";
+            try { doc.Info.Creator = ""; } catch { }
+            try { doc.Info.Elements.Remove("/Producer"); } catch { }
 
             SafeSaveDocument(doc, destinationPath);
         }, ct);
