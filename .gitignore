@@ -1,0 +1,11 @@
+## Visual Studio / .NET
+[Bb]in/
+[Oo]bj/
+publish/
+dist/
+*.user
+*.suo
+.vs/
+.idea/
+.vscode/
+*.DotSettings.user
