@@ -32,7 +32,20 @@ jobs:
     - name: Gerar Instalador (.EXE)
       shell: powershell
       run: |
-        & "C:\Program Files (x86)\Inno Setup 6\iscc.exe" packaging/installer.iss
+        $iscc = (Get-Command iscc.exe -ErrorAction SilentlyContinue)?.Source
+        if (-not $iscc) {
+            $candidates = @(
+                "C:\Program Files (x86)\Inno Setup 6\iscc.exe",
+                "C:\Program Files\Inno Setup 6\iscc.exe",
+                "C:\ProgramData\chocolatey\bin\iscc.exe"
+            )
+            $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+        }
+        if (-not $iscc) {
+            throw "Inno Setup Compiler (iscc.exe) nao foi encontrado no runner."
+        }
+        Write-Host "Compilando instalador usando: $iscc"
+        & $iscc packaging/installer.iss
 
     - name: Disponibilizar Instalador do Windows
       uses: actions/upload-artifact@v4

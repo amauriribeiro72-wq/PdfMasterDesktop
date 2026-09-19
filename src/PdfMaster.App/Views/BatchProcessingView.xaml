@@ -5,9 +5,13 @@
              xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
              xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
              mc:Ignorable="d" 
-             d:DesignHeight="650" d:DesignWidth="1000">
+             d:DesignHeight="700" d:DesignWidth="1050">
 
-    <Grid Margin="20">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisConverter"/>
+    </UserControl.Resources>
+
+    <Grid Margin="18">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -15,7 +19,7 @@
         </Grid.RowDefinitions>
 
         <!-- Barra Superior de Ferramentas -->
-        <Border Grid.Row="0" Margin="0,0,0,16" Padding="12" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+        <Border Grid.Row="0" Margin="0,0,0,14" Padding="10,8" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -27,31 +31,33 @@
                     <Button Command="{Binding AddFilesCommand}" Padding="16,8" Margin="0,0,8,0" Background="{DynamicResource AccentFillColorDefaultBrush}" Foreground="White" FontWeight="SemiBold">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="➕" Margin="0,0,8,0"/>
-                            <TextBlock Text="Adicionar Arquivos PDF"/>
+                            <TextBlock Text="Adicionar PDFs"/>
                         </StackPanel>
                     </Button>
 
-                    <Button Command="{Binding RemoveSelectedFileCommand}" Padding="14,8" Margin="0,0,8,0">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="➖" Margin="0,0,6,0"/>
-                            <TextBlock Text="Remover Selecionado"/>
-                        </StackPanel>
+                    <Button Command="{Binding MoveUpCommand}" Padding="10,8" Margin="0,0,6,0" ToolTip="Mover arquivo para cima na ordem de mesclagem">
+                        <TextBlock Text="🔼 Subir"/>
                     </Button>
 
-                    <Button Command="{Binding ClearAllFilesCommand}" Padding="14,8">
-                        <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="🗑️" Margin="0,0,6,0"/>
-                            <TextBlock Text="Limpar Lista"/>
-                        </StackPanel>
+                    <Button Command="{Binding MoveDownCommand}" Padding="10,8" Margin="0,0,8,0" ToolTip="Mover arquivo para baixo na ordem de mesclagem">
+                        <TextBlock Text="🔽 Descer"/>
+                    </Button>
+
+                    <Button Command="{Binding RemoveSelectedFileCommand}" Padding="10,8" Margin="0,0,6,0">
+                        <TextBlock Text="➖ Remover"/>
+                    </Button>
+
+                    <Button Command="{Binding ClearAllFilesCommand}" Padding="10,8">
+                        <TextBlock Text="🗑️ Limpar Tudo"/>
                     </Button>
                 </StackPanel>
 
-                <!-- Atalhos de Saída -->
-                <StackPanel Grid.Column="2" Orientation="Horizontal" Visibility="{Binding LastOutputFilePath, Converter={x:Null}}">
-                    <Button Command="{Binding OpenLastOutputFileCommand}" Margin="0,0,8,0" Padding="12,8">
+                <!-- Atalhos Pós-Processamento -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Visibility="{Binding HasLastOutputFile, Converter={StaticResource BoolToVisConverter}}">
+                    <Button Command="{Binding OpenLastOutputFileCommand}" Margin="0,0,8,0" Padding="14,8" Background="{DynamicResource AccentFillColorDefaultBrush}" Foreground="White" FontWeight="SemiBold">
                         <StackPanel Orientation="Horizontal">
                             <TextBlock Text="👁️" Margin="0,0,6,0"/>
-                            <TextBlock Text="Visualizar Resultado"/>
+                            <TextBlock Text="Abrir Arquivo Alterado"/>
                         </StackPanel>
                     </Button>
                     <Button Command="{Binding OpenOutputFolderCommand}" Padding="12,8">
@@ -64,82 +70,263 @@
             </Grid>
         </Border>
 
-        <!-- Corpo Principal: Lista de Arquivos (Esquerda) e Painel de Ações (Direita) -->
+        <!-- Corpo Principal -->
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="1.4*"/>
-                <ColumnDefinition Width="16"/>
-                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="1.3*"/>
+                <ColumnDefinition Width="14"/>
+                <ColumnDefinition Width="1.7*"/>
             </Grid.ColumnDefinitions>
 
-            <!-- Lista de Arquivos com Arrastar e Soltar -->
-            <Border Grid.Column="0" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" Padding="10">
+            <!-- Painel Esquerdo: Lista de PDFs com Suporte a Drag & Drop -->
+            <Border Grid.Column="0" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" Padding="12">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <TextBlock Grid.Row="0" Text="Documentos Selecionados" FontSize="15" FontWeight="SemiBold" Margin="4,4,4,10" Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                    <Grid Grid.Row="0" Margin="0,0,0,8">
+                        <TextBlock Text="Arquivos Carregados" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
+                        <TextBlock Text="Arraste arquivos aqui" HorizontalAlignment="Right" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                    </Grid>
 
-                    <ListView Grid.Row="1" ItemsSource="{Binding Files}" SelectedItem="{Binding SelectedFile}">
+                    <ListView Grid.Row="1" ItemsSource="{Binding Files}" SelectedItem="{Binding SelectedFile}"
+                              AllowDrop="True" DragOver="OnListDragOver" Drop="OnListDrop">
                         <ListView.View>
                             <GridView>
-                                <GridViewColumn Header="Nome do Arquivo" Width="260" DisplayMemberBinding="{Binding FileName}"/>
-                                <GridViewColumn Header="Tamanho" Width="90" DisplayMemberBinding="{Binding FileSizeFormatted}"/>
-                                <GridViewColumn Header="Status" Width="120" DisplayMemberBinding="{Binding Status}"/>
+                                <GridViewColumn Header="Nome do Documento" Width="220" DisplayMemberBinding="{Binding FileName}"/>
+                                <GridViewColumn Header="Tamanho" Width="80" DisplayMemberBinding="{Binding FileSizeFormatted}"/>
+                                <GridViewColumn Header="Status" Width="100" DisplayMemberBinding="{Binding Status}"/>
                             </GridView>
                         </ListView.View>
                     </ListView>
+
+                    <Border Grid.Row="2" Margin="0,8,0,0" Padding="8" Background="#0A000000" CornerRadius="6">
+                        <TextBlock Text="💡 Todos os arquivos gerados são salvos automaticamente na MESMA PASTA do arquivo original." 
+                                   TextWrapping="Wrap" FontSize="11" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                    </Border>
                 </Grid>
             </Border>
 
-            <!-- Painel de Operações Rápidas -->
-            <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
-                <StackPanel>
-                    <!-- Card Mesclar -->
-                    <Border Margin="0,0,0,12" Padding="14" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+            <!-- Painel Direito: Abas com Todas as Ferramentas -->
+            <TabControl Grid.Column="2">
+                <!-- Aba 1: Organizar Páginas -->
+                <TabItem Header="📑 Organizar Páginas">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,10,0,0">
                         <StackPanel>
-                            <TextBlock Text="📑 Mesclar Documentos" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                            <TextBlock Text="Une todos os PDFs da lista em um único documento sequencial." TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"/>
-                            <Button Command="{Binding MergeFilesCommand}" HorizontalAlignment="Stretch" Padding="10,6" Content="Mesclar em Único PDF"/>
-                        </StackPanel>
-                    </Border>
+                            <!-- Card Mesclar -->
+                            <Border Margin="0,0,0,10" Padding="12" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                                <StackPanel>
+                                    <TextBlock Text="📑 Mesclar Todos os Documentos" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <TextBlock Text="Une os PDFs da lista em um único arquivo na ordem exibida." FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,8"/>
+                                    <Button Command="{Binding MergeFilesCommand}" HorizontalAlignment="Stretch" Padding="10,6" Content="Mesclar em 1 Arquivo (Salvar na mesma pasta)"/>
+                                </StackPanel>
+                            </Border>
 
-                    <!-- Card Compressão -->
-                    <Border Margin="0,0,0,12" Padding="14" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
-                        <StackPanel>
-                            <TextBlock Text="🗜️ Otimização e Compressão" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                            <TextBlock Text="Remove objetos redundantes e compacta fluxos para reduzir tamanho." TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,10"/>
-                            <Button Command="{Binding CompressFilesCommand}" HorizontalAlignment="Stretch" Padding="10,6" Content="Otimizar e Reduzir Tamanho"/>
-                        </StackPanel>
-                    </Border>
+                            <!-- Card Girar Páginas -->
+                            <Border Margin="0,0,0,10" Padding="12" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                                <StackPanel>
+                                    <TextBlock Text="🔄 Girar Páginas do Documento" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <TextBlock Text="Rotaciona todas as páginas do arquivo selecionado." FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,8"/>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="8"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="8"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Button Grid.Column="0" Content="90° Horário" Command="{Binding Rotate90Command}"/>
+                                        <Button Grid.Column="2" Content="180°" Command="{Binding Rotate180Command}"/>
+                                        <Button Grid.Column="4" Content="270° (Anti-horário)" Command="{Binding Rotate270Command}"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
 
-                    <!-- Card Marca d'Água -->
-                    <Border Margin="0,0,0,12" Padding="14" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
-                        <StackPanel>
-                            <TextBlock Text="🛡️ Inserir Marca d'Água" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                            <TextBlock Text="Aplica carimbo de segurança em todas as páginas." TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,8"/>
-                            <TextBox Text="{Binding WatermarkText, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" Padding="6"/>
-                            <Button Command="{Binding ApplyWatermarkCommand}" HorizontalAlignment="Stretch" Padding="10,6" Content="Aplicar Marca d'Água"/>
-                        </StackPanel>
-                    </Border>
+                            <!-- Card Dividir PDF -->
+                            <Border Margin="0,0,0,10" Padding="12" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                                <StackPanel>
+                                    <TextBlock Text="✂️ Dividir PDF por Faixas" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <TextBlock Text="Separa o arquivo selecionado em partes (ex: 1-2, 3-5)." FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,6"/>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="8"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Grid.Column="0" Text="{Binding SplitRangesText, UpdateSourceTrigger=PropertyChanged}" Padding="6"/>
+                                        <Button Grid.Column="2" Command="{Binding SplitFilesCommand}" Padding="12,6" Content="Dividir PDF"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
 
-                    <!-- Card Segurança com Senha -->
-                    <Border Margin="0,0,0,12" Padding="14" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
-                        <StackPanel>
-                            <TextBlock Text="🔒 Proteger com Senha" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                            <TextBlock Text="Criptografa os documentos com algoritmo padrão PDF." TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,8"/>
-                            <TextBox Text="{Binding Password, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,8" Padding="6"/>
-                            <Button Command="{Binding ProtectWithPasswordCommand}" HorizontalAlignment="Stretch" Padding="10,6" Content="Criptografar Arquivos"/>
+                            <!-- Card Excluir Páginas -->
+                            <Border Margin="0,0,0,10" Padding="12" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                                <StackPanel>
+                                    <TextBlock Text="🗑️ Excluir Páginas Selecionadas" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <TextBlock Text="Remove páginas específicas do PDF (ex: 1, 3, 5-8)." FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,6"/>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="8"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Grid.Column="0" Text="{Binding PagesToDeleteText, UpdateSourceTrigger=PropertyChanged}" Padding="6"/>
+                                        <Button Grid.Column="2" Command="{Binding DeletePagesCommand}" Padding="12,6" Content="Remover Páginas"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Card Extrair Páginas -->
+                            <Border Margin="0,0,0,10" Padding="12" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                                <StackPanel>
+                                    <TextBlock Text="📤 Extrair Páginas para Novo PDF" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <TextBlock Text="Gera um novo arquivo contendo apenas as páginas indicadas (ex: 1-3)." FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,6"/>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="8"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Grid.Column="0" Text="{Binding PagesToExtractText, UpdateSourceTrigger=PropertyChanged}" Padding="6"/>
+                                        <Button Grid.Column="2" Command="{Binding ExtractPagesCommand}" Padding="12,6" Content="Extrair Páginas"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Card Numeração de Páginas -->
+                            <Border Margin="0,0,0,10" Padding="12" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                                <StackPanel>
+                                    <TextBlock Text="🔢 Inserir Numeração de Páginas (Paginação)" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <TextBlock Text="Insere números automáticos (ex: 'Pág. {0} de {1}') no rodapé ou cabeçalho." FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,6"/>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="8"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Grid.Column="0" Text="{Binding PageNumberMask, UpdateSourceTrigger=PropertyChanged}" Padding="6"/>
+                                        <Button Grid.Column="2" Command="{Binding AddPageNumbersCommand}" Padding="12,6" Content="Aplicar Paginação"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
-                    </Border>
-                </StackPanel>
-            </ScrollViewer>
+                    </ScrollViewer>
+                </TabItem>
+
+                <!-- Aba 2: Otimização & Marca d'Água -->
+                <TabItem Header="🗜️ Otimização &amp; Sigilo">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,10,0,0">
+                        <StackPanel>
+                            <!-- Card Compressão -->
+                            <Border Margin="0,0,0,10" Padding="12" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                                <StackPanel>
+                                    <TextBlock Text="🗜️ Otimizar e Comprimir Arquivos" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <TextBlock Text="Reduz o peso do PDF removendo redundâncias sem perda de texto ou qualidade." FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,8"/>
+                                    <Button Command="{Binding CompressFilesCommand}" HorizontalAlignment="Stretch" Padding="10,6" Content="Comprimir Arquivos (Salvar na mesma pasta)"/>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Card Marca d'Água -->
+                            <Border Margin="0,0,0,10" Padding="12" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                                <StackPanel>
+                                    <TextBlock Text="🛡️ Inserir Marca d'Água Personalizada" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <TextBlock Text="Aplica carimbo de segurança em todas as páginas com ângulo de 45°." FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,6"/>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="8"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Grid.Column="0" Text="{Binding WatermarkText, UpdateSourceTrigger=PropertyChanged}" Padding="6"/>
+                                        <Button Grid.Column="2" Command="{Binding ApplyWatermarkCommand}" Padding="12,6" Content="Aplicar Marca"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Card Sanitizar Metadados -->
+                            <Border Margin="0,0,0,10" Padding="12" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                                <StackPanel>
+                                    <TextBlock Text="🧹 Sanitizar Metadados (Privacidade / LGPD)" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <TextBlock Text="Remove Autor, Criador, Título, Softwares e histórico de alterações do arquivo." FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,8"/>
+                                    <Button Command="{Binding SanitizeMetadataCommand}" HorizontalAlignment="Stretch" Padding="10,6" Content="Sanitizar e Limpar Histórico"/>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+
+                <!-- Aba 3: Senha & Assinatura Digital ICP-Brasil -->
+                <TabItem Header="🔒 Senha &amp; ICP-Brasil">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,10,0,0">
+                        <StackPanel>
+                            <!-- Card Proteger com Senha -->
+                            <Border Margin="0,0,0,10" Padding="12" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                                <StackPanel>
+                                    <TextBlock Text="🔒 Proteger PDF com Senha" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <TextBlock Text="Criptografa o arquivo com senha padrão para impedir visualização não autorizada." FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,6"/>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="8"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Grid.Column="0" Text="{Binding Password, UpdateSourceTrigger=PropertyChanged}" Padding="6"/>
+                                        <Button Grid.Column="2" Command="{Binding ProtectWithPasswordCommand}" Padding="12,6" Content="Proteger com Senha"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Card Desbloquear Senha -->
+                            <Border Margin="0,0,0,10" Padding="12" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                                <StackPanel>
+                                    <TextBlock Text="🔓 Desbloquear / Remover Senha de PDF" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <TextBlock Text="Remove a senha e restrições de um PDF já protegido (digite a senha atual)." FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,6"/>
+                                    <Grid Margin="0,0,0,8">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="8"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Grid.Column="0" Text="{Binding UnlockPassword, UpdateSourceTrigger=PropertyChanged}" Padding="6"/>
+                                        <Button Grid.Column="2" Command="{Binding UnlockWithPasswordCommand}" Padding="12,6" Content="Desbloquear Arquivo"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Card Assinatura Digital ICP-Brasil -->
+                            <Border Margin="0,0,0,10" Padding="12" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+                                <StackPanel>
+                                    <TextBlock Text="✍️ Assinatura Digital ICP-Brasil (A1 / A3 Token)" FontSize="14" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                    <TextBlock Text="Aplica selo visual oficial e gera assinatura criptográfica CMS/PKCS#7 com validade jurídica." FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}" Margin="0,0,0,8"/>
+
+                                    <TextBlock Text="Certificado do Windows:" FontSize="11" Margin="0,0,0,4"/>
+                                    <ComboBox ItemsSource="{Binding AvailableCertificates}" SelectedItem="{Binding SelectedCertificate}" DisplayMemberPath="Subject" Margin="0,0,0,8" Padding="6"/>
+
+                                    <TextBlock Text="Motivo da Assinatura:" FontSize="11" Margin="0,0,0,4"/>
+                                    <TextBox Text="{Binding SignatureReason, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,0,10" Padding="6"/>
+
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="8"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Button Grid.Column="0" Command="{Binding LoadCertificatesCommand}" Content="🔄 Atualizar Certificados" Padding="10,6"/>
+                                        <Button Grid.Column="2" Command="{Binding SignDocumentCommand}" Content="Assinar Documento Selecionado" Background="{DynamicResource AccentFillColorDefaultBrush}" Foreground="White" FontWeight="SemiBold" Padding="10,6"/>
+                                    </Grid>
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+                    </ScrollViewer>
+                </TabItem>
+            </TabControl>
         </Grid>
 
         <!-- Barra Inferior de Progresso e Status -->
-        <Border Grid.Row="2" Margin="0,16,0,0" Padding="12" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+        <Border Grid.Row="2" Margin="0,14,0,0" Padding="12,10" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" CornerRadius="8" BorderThickness="1" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -148,7 +335,7 @@
 
                 <Grid Grid.Row="0" Margin="0,0,0,6">
                     <TextBlock Text="{Binding StatusMessage}" FontWeight="Medium" Foreground="{DynamicResource TextFillColorPrimaryBrush}"/>
-                    <TextBlock Text="100% Offline &amp; Seguro" HorizontalAlignment="Right" Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="11"/>
+                    <TextBlock Text="100% Offline • Salva na Mesma Pasta • Segurança Total" HorizontalAlignment="Right" Foreground="{DynamicResource TextFillColorSecondaryBrush}" FontSize="11"/>
                 </Grid>
 
                 <ProgressBar Grid.Row="1" Height="6" Value="{Binding ProgressValue}" Maximum="100" IsIndeterminate="{Binding IsBusy}"/>

@@ -14,15 +14,50 @@ namespace PdfMaster.Infrastructure.Services;
 
 public class PdfService : IPdfService
 {
+    private static MemoryStream LoadToMemory(string filePath)
+    {
+        var fullPath = Path.GetFullPath(filePath);
+        using var fs = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        var ms = new MemoryStream();
+        fs.CopyTo(ms);
+        ms.Position = 0;
+        return ms;
+    }
+
+    private static void SafeSaveDocument(PdfDocument document, string destinationPath)
+    {
+        var fullDest = Path.GetFullPath(destinationPath);
+        var dir = Path.GetDirectoryName(fullDest);
+        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+        {
+            Directory.CreateDirectory(dir);
+        }
+
+        string tempFile = Path.Combine(dir ?? ".", $"{Path.GetFileName(fullDest)}.tmp_{Guid.NewGuid():N}");
+        try
+        {
+            document.Save(tempFile);
+            File.Move(tempFile, fullDest, overwrite: true);
+        }
+        catch (IOException ioEx)
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+            throw new IOException($"O arquivo de destino '{Path.GetFileName(fullDest)}' está aberto em outro aplicativo (ex: Adobe Reader ou navegador). Feche-o e tente novamente.", ioEx);
+        }
+        catch
+        {
+            if (File.Exists(tempFile)) File.Delete(tempFile);
+            throw;
+        }
+    }
+
     public Task<string> MergeFilesAsync(IEnumerable<string> sourceFiles, string destinationPath, IProgress<double>? progress = null, CancellationToken ct = default)
     {
         return Task.Run(() =>
         {
-            var filesList = sourceFiles.ToList();
+            var filesList = sourceFiles.Select(Path.GetFullPath).ToList();
             if (filesList.Count == 0)
                 throw new ArgumentException("Nenhum arquivo informado para mesclar.");
-
-            EnsureOutputDirectory(destinationPath);
 
             using var outputDocument = new PdfDocument();
             int totalFiles = filesList.Count;
@@ -32,19 +67,28 @@ public class PdfService : IPdfService
                 ct.ThrowIfCancellationRequested();
                 var filePath = filesList[i];
 
-                using var inputDocument = PdfReader.Open(filePath, PdfDocumentOpenMode.Import);
-                int count = inputDocument.PageCount;
-                for (int idx = 0; idx < count; idx++)
+                try
                 {
-                    ct.ThrowIfCancellationRequested();
-                    var page = inputDocument.Pages[idx];
-                    outputDocument.AddPage(page);
+                    using var ms = LoadToMemory(filePath);
+                    using var inputDocument = PdfReader.Open(ms, PdfDocumentOpenMode.Import);
+                    for (int idx = 0; idx < inputDocument.PageCount; idx++)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        outputDocument.AddPage(inputDocument.Pages[idx]);
+                    }
+                }
+                catch (PdfReaderException ex)
+                {
+                    throw new InvalidOperationException($"O arquivo '{Path.GetFileName(filePath)}' está protegido por senha ou corrompido.", ex);
                 }
 
                 progress?.Report((double)(i + 1) / totalFiles * 100.0);
             }
 
-            outputDocument.Save(destinationPath);
+            if (outputDocument.PageCount == 0)
+                throw new InvalidOperationException("Nenhuma página pôde ser extraída dos documentos fornecidos.");
+
+            SafeSaveDocument(outputDocument, destinationPath);
             return destinationPath;
         }, ct);
     }
@@ -53,28 +97,35 @@ public class PdfService : IPdfService
     {
         return Task.Run(() =>
         {
-            Directory.CreateDirectory(outputFolder);
-            var resultFiles = new List<string>();
+            var fullSource = Path.GetFullPath(sourceFile);
+            var fullOutputFolder = Path.GetFullPath(outputFolder);
+            Directory.CreateDirectory(fullOutputFolder);
 
-            using var inputDocument = PdfReader.Open(sourceFile, PdfDocumentOpenMode.Import);
+            var resultFiles = new List<string>();
+            using var ms = LoadToMemory(fullSource);
+            using var inputDocument = PdfReader.Open(ms, PdfDocumentOpenMode.Import);
             int baseNameIndex = 1;
 
             foreach (var range in ranges)
             {
                 ct.ThrowIfCancellationRequested();
-                using var outputDoc = new PdfDocument();
-
                 int start = Math.Max(1, range.Start);
                 int end = Math.Min(inputDocument.PageCount, range.End);
 
+                if (start > end || start > inputDocument.PageCount) continue;
+
+                using var outputDoc = new PdfDocument();
                 for (int i = start - 1; i < end; i++)
                 {
                     outputDoc.AddPage(inputDocument.Pages[i]);
                 }
 
-                string outFileName = Path.Combine(outputFolder, $"{Path.GetFileNameWithoutExtension(sourceFile)}_parte_{baseNameIndex++}_pags_{start}-{end}.pdf");
-                outputDoc.Save(outFileName);
-                resultFiles.Add(outFileName);
+                if (outputDoc.PageCount > 0)
+                {
+                    string outFileName = Path.Combine(fullOutputFolder, $"{Path.GetFileNameWithoutExtension(fullSource)}_parte_{baseNameIndex++}_pags_{start}-{end}.pdf");
+                    SafeSaveDocument(outputDoc, outFileName);
+                    resultFiles.Add(outFileName);
+                }
             }
 
             return (IEnumerable<string>)resultFiles;
@@ -85,8 +136,8 @@ public class PdfService : IPdfService
     {
         return Task.Run(() =>
         {
-            EnsureOutputDirectory(destinationPath);
-            using var inputDocument = PdfReader.Open(sourceFile, PdfDocumentOpenMode.Import);
+            using var ms = LoadToMemory(sourceFile);
+            using var inputDocument = PdfReader.Open(ms, PdfDocumentOpenMode.Import);
             using var outputDocument = new PdfDocument();
 
             foreach (var index in newPageIndices)
@@ -98,7 +149,10 @@ public class PdfService : IPdfService
                 }
             }
 
-            outputDocument.Save(destinationPath);
+            if (outputDocument.PageCount == 0)
+                throw new InvalidOperationException("A lista de índices resultou em um documento sem páginas.");
+
+            SafeSaveDocument(outputDocument, destinationPath);
         }, ct);
     }
 
@@ -106,8 +160,8 @@ public class PdfService : IPdfService
     {
         return Task.Run(() =>
         {
-            EnsureOutputDirectory(destinationPath);
-            using var inputDocument = PdfReader.Open(sourceFile, PdfDocumentOpenMode.Import);
+            using var ms = LoadToMemory(sourceFile);
+            using var inputDocument = PdfReader.Open(ms, PdfDocumentOpenMode.Import);
             using var outputDocument = new PdfDocument();
 
             for (int i = 0; i < inputDocument.PageCount; i++)
@@ -118,11 +172,11 @@ public class PdfService : IPdfService
                 if (pageRotations.TryGetValue(i, out int rotationAngle))
                 {
                     int currentRotate = page.Rotate;
-                    page.Rotate = (currentRotate + rotationAngle) % 360;
+                    page.Rotate = ((currentRotate + rotationAngle) % 360 + 360) % 360;
                 }
             }
 
-            outputDocument.Save(destinationPath);
+            SafeSaveDocument(outputDocument, destinationPath);
         }, ct);
     }
 
@@ -130,10 +184,9 @@ public class PdfService : IPdfService
     {
         return Task.Run(() =>
         {
-            EnsureOutputDirectory(destinationPath);
             var toDeleteSet = new HashSet<int>(pagesToDelete);
-
-            using var inputDocument = PdfReader.Open(sourceFile, PdfDocumentOpenMode.Import);
+            using var ms = LoadToMemory(sourceFile);
+            using var inputDocument = PdfReader.Open(ms, PdfDocumentOpenMode.Import);
             using var outputDocument = new PdfDocument();
 
             for (int i = 0; i < inputDocument.PageCount; i++)
@@ -145,7 +198,10 @@ public class PdfService : IPdfService
                 }
             }
 
-            outputDocument.Save(destinationPath);
+            if (outputDocument.PageCount == 0)
+                throw new InvalidOperationException("Não é possível salvar um documento PDF com 0 páginas.");
+
+            SafeSaveDocument(outputDocument, destinationPath);
         }, ct);
     }
 
@@ -153,10 +209,9 @@ public class PdfService : IPdfService
     {
         return Task.Run(() =>
         {
-            EnsureOutputDirectory(destinationPath);
             var toExtractSet = new HashSet<int>(pagesToExtract);
-
-            using var inputDocument = PdfReader.Open(sourceFile, PdfDocumentOpenMode.Import);
+            using var ms = LoadToMemory(sourceFile);
+            using var inputDocument = PdfReader.Open(ms, PdfDocumentOpenMode.Import);
             using var outputDocument = new PdfDocument();
 
             for (int i = 0; i < inputDocument.PageCount; i++)
@@ -168,7 +223,10 @@ public class PdfService : IPdfService
                 }
             }
 
-            outputDocument.Save(destinationPath);
+            if (outputDocument.PageCount == 0)
+                throw new InvalidOperationException("Nenhuma página selecionada para extração.");
+
+            SafeSaveDocument(outputDocument, destinationPath);
         }, ct);
     }
 
@@ -176,8 +234,8 @@ public class PdfService : IPdfService
     {
         return Task.Run(() =>
         {
-            EnsureOutputDirectory(destinationPath);
-            using var doc = PdfReader.Open(sourceFile, PdfDocumentOpenMode.Modify);
+            using var ms = LoadToMemory(sourceFile);
+            using var doc = PdfReader.Open(ms, PdfDocumentOpenMode.Modify);
 
             var font = new XFont("Arial", 42, XFontStyle.Bold);
             int alpha = (int)Math.Clamp(opacity * 255, 10, 255);
@@ -187,22 +245,14 @@ public class PdfService : IPdfService
             {
                 ct.ThrowIfCancellationRequested();
                 using var gfx = XGraphics.FromPdfPage(page, XGraphicsPdfPageOptions.Append);
-
                 var size = gfx.MeasureString(watermarkText, font);
 
-                // Centraliza e rotaciona
                 gfx.TranslateTransform(page.Width.Point / 2, page.Height.Point / 2);
                 gfx.RotateTransform(-angleDegree);
-
-                gfx.DrawString(
-                    watermarkText,
-                    font,
-                    brush,
-                    new XPoint(-size.Width / 2, size.Height / 4)
-                );
+                gfx.DrawString(watermarkText, font, brush, new XPoint(-size.Width / 2, size.Height / 4));
             }
 
-            doc.Save(destinationPath);
+            SafeSaveDocument(doc, destinationPath);
         }, ct);
     }
 
@@ -210,11 +260,10 @@ public class PdfService : IPdfService
     {
         return Task.Run(() =>
         {
-            EnsureOutputDirectory(destinationPath);
-            using var doc = PdfReader.Open(sourceFile, PdfDocumentOpenMode.Modify);
+            using var ms = LoadToMemory(sourceFile);
+            using var doc = PdfReader.Open(ms, PdfDocumentOpenMode.Modify);
             var font = new XFont("Arial", 10, XFontStyle.Regular);
             var brush = new XSolidBrush(XColor.FromArgb(200, 60, 60, 60));
-
             int totalPages = doc.PageCount;
 
             for (int i = 0; i < totalPages; i++)
@@ -232,7 +281,7 @@ public class PdfService : IPdfService
                 gfx.DrawString(text, font, brush, new XPoint(x, y));
             }
 
-            doc.Save(destinationPath);
+            SafeSaveDocument(doc, destinationPath);
         }, ct);
     }
 
@@ -240,9 +289,8 @@ public class PdfService : IPdfService
     {
         return Task.Run(() =>
         {
-            EnsureOutputDirectory(destinationPath);
-
-            using var input = PdfReader.Open(sourceFile, PdfDocumentOpenMode.Import);
+            using var ms = LoadToMemory(sourceFile);
+            using var input = PdfReader.Open(ms, PdfDocumentOpenMode.Import);
             using var output = new PdfDocument();
 
             output.Options.CompressContentStreams = true;
@@ -264,10 +312,10 @@ public class PdfService : IPdfService
                 output.Info.Subject = "";
                 output.Info.Keywords = "";
                 output.Info.Creator = "";
-                output.Info.Producer = "PdfMaster Desktop";
+                output.Info.Producer = "PDF Master Pro";
             }
 
-            output.Save(destinationPath);
+            SafeSaveDocument(output, destinationPath);
             return new FileInfo(destinationPath).Length;
         }, ct);
     }
@@ -276,8 +324,14 @@ public class PdfService : IPdfService
     {
         return Task.Run(() =>
         {
-            using var doc = PdfReader.Open(sourceFile, PdfDocumentOpenMode.InformationOnly);
+            using var ms = LoadToMemory(sourceFile);
+            using var doc = PdfReader.Open(ms, PdfDocumentOpenMode.InformationOnly);
             var info = doc.Info;
+
+            DateTime? cDate = null;
+            DateTime? mDate = null;
+            try { cDate = info.CreationDate; } catch { }
+            try { mDate = info.ModificationDate; } catch { }
 
             return new DocumentMetadata(
                 Title: info.Title,
@@ -286,8 +340,8 @@ public class PdfService : IPdfService
                 Keywords: info.Keywords,
                 Creator: info.Creator,
                 Producer: info.Producer,
-                CreationDate: info.CreationDate,
-                ModificationDate: info.ModificationDate,
+                CreationDate: cDate,
+                ModificationDate: mDate,
                 PageCount: doc.PageCount
             );
         }, ct);
@@ -297,8 +351,8 @@ public class PdfService : IPdfService
     {
         return Task.Run(() =>
         {
-            EnsureOutputDirectory(destinationPath);
-            using var doc = PdfReader.Open(sourceFile, PdfDocumentOpenMode.Modify);
+            using var ms = LoadToMemory(sourceFile);
+            using var doc = PdfReader.Open(ms, PdfDocumentOpenMode.Modify);
 
             doc.Info.Title = "";
             doc.Info.Author = "";
@@ -307,7 +361,7 @@ public class PdfService : IPdfService
             doc.Info.Creator = "";
             doc.Info.Producer = "";
 
-            doc.Save(destinationPath);
+            SafeSaveDocument(doc, destinationPath);
         }, ct);
     }
 
@@ -315,8 +369,8 @@ public class PdfService : IPdfService
     {
         return Task.Run(() =>
         {
-            EnsureOutputDirectory(destinationPath);
-            using var doc = PdfReader.Open(sourceFile, PdfDocumentOpenMode.Modify);
+            using var ms = LoadToMemory(sourceFile);
+            using var doc = PdfReader.Open(ms, PdfDocumentOpenMode.Modify);
 
             doc.SecuritySettings.UserPassword = userPassword;
             doc.SecuritySettings.OwnerPassword = string.IsNullOrEmpty(ownerPassword) ? userPassword : ownerPassword;
@@ -324,7 +378,7 @@ public class PdfService : IPdfService
             doc.SecuritySettings.PermitModifyDocument = false;
             doc.SecuritySettings.PermitExtractContent = false;
 
-            doc.Save(destinationPath);
+            SafeSaveDocument(doc, destinationPath);
         }, ct);
     }
 
@@ -332,22 +386,23 @@ public class PdfService : IPdfService
     {
         return Task.Run(() =>
         {
-            EnsureOutputDirectory(destinationPath);
-            using var doc = PdfReader.Open(sourceFile, password, PdfDocumentOpenMode.Modify);
+            using var ms = LoadToMemory(sourceFile);
+            PdfDocument doc;
+            try
+            {
+                doc = PdfReader.Open(ms, password, PdfDocumentOpenMode.Modify);
+            }
+            catch (PdfReaderException ex)
+            {
+                throw new InvalidOperationException("A senha fornecida para o documento está incorreta ou o arquivo está danificado.", ex);
+            }
 
-            doc.SecuritySettings.UserPassword = "";
-            doc.SecuritySettings.OwnerPassword = "";
-
-            doc.Save(destinationPath);
+            using (doc)
+            {
+                doc.SecuritySettings.UserPassword = "";
+                doc.SecuritySettings.OwnerPassword = "";
+                SafeSaveDocument(doc, destinationPath);
+            }
         }, ct);
-    }
-
-    private static void EnsureOutputDirectory(string path)
-    {
-        var dir = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-        {
-            Directory.CreateDirectory(dir);
-        }
     }
 }

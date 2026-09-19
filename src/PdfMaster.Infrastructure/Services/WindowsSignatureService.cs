@@ -43,9 +43,9 @@ public class WindowsSignatureService : IDigitalSignatureService
                     }
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Fallback silencioso se não houver acesso à store
+                throw new InvalidOperationException($"Não foi possível ler os certificados do Windows: {ex.Message}", ex);
             }
 
             return (IReadOnlyList<DigitalCertificateInfo>)list;
@@ -63,14 +63,17 @@ public class WindowsSignatureService : IDigitalSignatureService
     {
         return Task.Run(() =>
         {
-            var dir = Path.GetDirectoryName(destinationPdfPath);
+            var fullDest = Path.GetFullPath(destinationPdfPath);
+            var dir = Path.GetDirectoryName(fullDest);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
             {
                 Directory.CreateDirectory(dir);
             }
 
-            // Abre o PDF para desenhar o carimbo visual de assinatura
-            using var doc = PdfReader.Open(sourcePdfPath, PdfDocumentOpenMode.Modify);
+            // Lê na memória para evitar bloqueios de arquivo
+            byte[] sourceBytes = File.ReadAllBytes(sourcePdfPath);
+            using var ms = new MemoryStream(sourceBytes);
+            using var doc = PdfReader.Open(ms, PdfDocumentOpenMode.Modify);
 
             int targetPageIdx = (stampPosition != null && stampPosition.PageNumber > 0 && stampPosition.PageNumber <= doc.PageCount)
                 ? stampPosition.PageNumber - 1
@@ -81,32 +84,42 @@ public class WindowsSignatureService : IDigitalSignatureService
             {
                 float x = stampPosition?.X ?? 40;
                 float y = stampPosition?.Y ?? (float)(page.Height.Point - 120);
-                float w = stampPosition?.Width ?? 300;
-                float h = stampPosition?.Height ?? 65;
+                float w = stampPosition?.Width ?? 320;
+                float h = stampPosition?.Height ?? 70;
 
-                // Fundo do selo
-                var pen = new XPen(XColor.FromArgb(180, 0, 102, 204), 1.5);
-                var bgBrush = new XSolidBrush(XColor.FromArgb(240, 245, 250, 255));
+                // Moldura com padrão visual PAdES
+                var pen = new XPen(XColor.FromArgb(200, 0, 90, 180), 1.5);
+                var bgBrush = new XSolidBrush(XColor.FromArgb(245, 248, 252, 255));
                 gfx.DrawRectangle(pen, bgBrush, x, y, w, h);
 
-                // Texto do selo ICP-Brasil / PAdES
                 var boldFont = new XFont("Arial", 8, XFontStyle.Bold);
                 var textFont = new XFont("Arial", 7, XFontStyle.Regular);
                 var textBrush = new XSolidBrush(XColor.FromArgb(255, 30, 30, 30));
 
-                gfx.DrawString("DOCUMENTO ASSINADO DIGITALMENTE", boldFont, textBrush, new XPoint(x + 10, y + 15));
+                gfx.DrawString("DOCUMENTO ASSINADO DIGITALMENTE (ICP-BRASIL)", boldFont, textBrush, new XPoint(x + 10, y + 16));
                 
                 string signerName = certificate.Subject.Split(',').FirstOrDefault(p => p.Trim().StartsWith("CN="))?.Replace("CN=", "") ?? certificate.Subject;
-                if (signerName.Length > 40) signerName = signerName.Substring(0, 37) + "...";
+                if (signerName.Length > 42) signerName = signerName.Substring(0, 39) + "...";
 
-                gfx.DrawString($"Signatário: {signerName}", textFont, textBrush, new XPoint(x + 10, y + 28));
-                gfx.DrawString($"Data/Hora: {DateTime.Now:dd/MM/yyyy HH:mm:ss} (UTC-3)", textFont, textBrush, new XPoint(x + 10, y + 40));
-                gfx.DrawString($"Motivo: {reason} | {location}", textFont, textBrush, new XPoint(x + 10, y + 52));
+                gfx.DrawString($"Signatário: {signerName}", textFont, textBrush, new XPoint(x + 10, y + 30));
+                gfx.DrawString($"Data: {DateTime.Now:dd/MM/yyyy HH:mm:ss} (Horário de Brasília)", textFont, textBrush, new XPoint(x + 10, y + 44));
+                gfx.DrawString($"Finalidade: {reason} | {location}", textFont, textBrush, new XPoint(x + 10, y + 58));
             }
 
-            doc.Save(destinationPdfPath);
+            // Salva de forma atômica
+            string tempFile = Path.Combine(dir ?? ".", $"{Path.GetFileName(fullDest)}.tmp_{Guid.NewGuid():N}");
+            try
+            {
+                doc.Save(tempFile);
+                File.Move(tempFile, fullDest, overwrite: true);
+            }
+            catch (Exception ex)
+            {
+                if (File.Exists(tempFile)) File.Delete(tempFile);
+                throw new IOException($"Erro ao gravar arquivo assinado '{Path.GetFileName(fullDest)}': {ex.Message}", ex);
+            }
 
-            // Gera assinatura criptográfica CMS/PKCS#7 vinculada ao hash do arquivo
+            // Gera assinatura CMS destacada (.p7s)
             try
             {
                 using var store = new X509Store(StoreName.My, StoreLocation.CurrentUser);
@@ -116,21 +129,20 @@ public class WindowsSignatureService : IDigitalSignatureService
                 if (certs.Count > 0)
                 {
                     var x509Cert = certs[0];
-                    byte[] fileBytes = File.ReadAllBytes(destinationPdfPath);
+                    byte[] fileBytes = File.ReadAllBytes(fullDest);
                     var contentInfo = new ContentInfo(fileBytes);
                     var signedCms = new SignedCms(contentInfo, detached: true);
                     var cmsSigner = new CmsSigner(x509Cert);
                     signedCms.ComputeSignature(cmsSigner);
                     byte[] signatureBytes = signedCms.Encode();
 
-                    // Salva arquivo com metadados de assinatura
-                    string p7sFile = Path.ChangeExtension(destinationPdfPath, ".p7s");
+                    string p7sFile = Path.ChangeExtension(fullDest, ".p7s");
                     File.WriteAllBytes(p7sFile, signatureBytes);
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                // Conclui com o selo visual aplicado
+                throw new InvalidOperationException($"O selo foi aplicado, mas a assinatura criptográfica falhou: {ex.Message}", ex);
             }
         }, ct);
     }
