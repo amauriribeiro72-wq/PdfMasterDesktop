@@ -1,9 +1,9 @@
-using Wpf.Ui.Controls;
+using System.Windows;
 using PdfMaster.App.ViewModels;
 
 namespace PdfMaster.App.Views;
 
-public partial class MainWindow : FluentWindow
+public partial class MainWindow : Window
 {
     public MainWindow(MainWindowViewModel viewModel)
     {
