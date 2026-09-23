@@ -252,8 +252,8 @@ public class PdfService : IPdfService
 
                 if (newX2 > newX1 && newY2 > newY1)
                 {
-                    page.MediaBox = new PdfRectangle(newX1, newY1, newX2, newY2);
-                    page.CropBox = new PdfRectangle(newX1, newY1, newX2, newY2);
+                    page.MediaBox = new PdfRectangle(new XPoint(newX1, newY1), new XPoint(newX2, newY2));
+                    page.CropBox = new PdfRectangle(new XPoint(newX1, newY1), new XPoint(newX2, newY2));
                 }
             }
 
