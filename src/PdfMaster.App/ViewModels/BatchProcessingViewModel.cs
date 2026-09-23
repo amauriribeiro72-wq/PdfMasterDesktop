@@ -6,6 +6,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using System.Windows;
+using System.Windows.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Win32;
@@ -39,10 +40,28 @@ public class BatchFileItem : ObservableObject
     }
 }
 
+public class PageThumbnailItem : ObservableObject
+{
+    public int PageIndex { get; set; }
+    public int PageNumber => PageIndex + 1;
+    public BitmapSource? ThumbnailSource { get; set; }
+    public double Width { get; set; }
+    public double Height { get; set; }
+
+    private bool _isSelected;
+    public bool IsSelected
+    {
+        get => _isSelected;
+        set => SetProperty(ref _isSelected, value);
+    }
+}
+
 public partial class BatchProcessingViewModel : ObservableObject
 {
     private readonly IPdfService _pdfService;
+    private readonly IPdfRendererService _rendererService;
     private readonly IDigitalSignatureService _signatureService;
+    private readonly IOcrService _ocrService;
 
     [ObservableProperty]
     private ObservableCollection<BatchFileItem> _files = new();
@@ -50,16 +69,23 @@ public partial class BatchProcessingViewModel : ObservableObject
     [ObservableProperty]
     private BatchFileItem? _selectedFile;
 
-    // Configurações de Operações
+    // Visualizador de Miniaturas de Páginas
     [ObservableProperty]
-    private string _watermarkText = "CONFIDENCIAL";
+    private ObservableCollection<PageThumbnailItem> _pageThumbnails = new();
 
     [ObservableProperty]
-    private string _password = "";
+    private PageThumbnailItem? _selectedThumbnail;
 
     [ObservableProperty]
-    private string _unlockPassword = "";
+    private bool _isLoadingThumbnails;
 
+    [ObservableProperty]
+    private BitmapSource? _previewZoomImage;
+
+    [ObservableProperty]
+    private bool _isPreviewZoomOpen;
+
+    // Categoria A: Páginas
     [ObservableProperty]
     private string _splitRangesText = "1-2, 3-5";
 
@@ -78,7 +104,29 @@ public partial class BatchProcessingViewModel : ObservableObject
     [ObservableProperty]
     private bool _pageNumberInHeader = false;
 
-    // Assinatura Digital ICP-Brasil
+    [ObservableProperty]
+    private string _watermarkText = "CONFIDENCIAL";
+
+    [ObservableProperty]
+    private double _cropMarginMm = 10;
+
+    [ObservableProperty]
+    private int _nUpPages = 2;
+
+    // Categoria B: Revisão e Formulários
+    [ObservableProperty]
+    private string _markupText = "Anotação";
+
+    [ObservableProperty]
+    private string _selectedMarkupType = "Highlight";
+
+    // Categoria C: Segurança e Assinatura
+    [ObservableProperty]
+    private string _password = "";
+
+    [ObservableProperty]
+    private string _unlockPassword = "";
+
     [ObservableProperty]
     private ObservableCollection<DigitalCertificateInfo> _availableCertificates = new();
 
@@ -87,6 +135,13 @@ public partial class BatchProcessingViewModel : ObservableObject
 
     [ObservableProperty]
     private string _signatureReason = "Documento assinado digitalmente";
+
+    // Categoria D: Otimização e Reparo
+    [ObservableProperty]
+    private string _selectedCompressionProfile = "Equilibrado";
+
+    [ObservableProperty]
+    private string _comparisonResultText = "";
 
     // Estado da Execução
     [ObservableProperty]
@@ -104,14 +159,192 @@ public partial class BatchProcessingViewModel : ObservableObject
 
     public bool HasLastOutputFile => !string.IsNullOrEmpty(LastOutputFilePath) && File.Exists(LastOutputFilePath);
 
-    public BatchProcessingViewModel(IPdfService pdfService, IDigitalSignatureService signatureService)
+    public BatchProcessingViewModel(
+        IPdfService pdfService,
+        IPdfRendererService rendererService,
+        IDigitalSignatureService signatureService,
+        IOcrService ocrService)
     {
         _pdfService = pdfService;
+        _rendererService = rendererService;
         _signatureService = signatureService;
+        _ocrService = ocrService;
         LoadCertificates();
     }
 
-    #region Gerenciamento da Lista de Arquivos
+    partial void OnSelectedFileChanged(BatchFileItem? value)
+    {
+        if (value != null && File.Exists(value.FullPath))
+        {
+            _ = LoadThumbnailsAsync(value.FullPath);
+        }
+        else
+        {
+            PageThumbnails.Clear();
+        }
+    }
+
+    #region Visualizador de Páginas & Miniaturas
+
+    public async Task LoadThumbnailsAsync(string filePath)
+    {
+        try
+        {
+            IsLoadingThumbnails = true;
+            PageThumbnails.Clear();
+            StatusMessage = $"Carregando miniaturas de {Path.GetFileName(filePath)}...";
+
+            var thumbs = await _rendererService.RenderThumbnailsAsync(filePath, 240);
+            foreach (var t in thumbs)
+            {
+                var bmp = CreateBitmapSource(t.ImageBytes);
+                PageThumbnails.Add(new PageThumbnailItem
+                {
+                    PageIndex = t.PageIndex,
+                    ThumbnailSource = bmp,
+                    Width = t.Width,
+                    Height = t.Height,
+                    IsSelected = false
+                });
+            }
+
+            StatusMessage = $"{PageThumbnails.Count} página(s) renderizada(s) no visualizador.";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Não foi possível renderizar miniaturas: {ex.Message}";
+        }
+        finally
+        {
+            IsLoadingThumbnails = false;
+        }
+    }
+
+    [RelayCommand]
+    private void SelectAllPages()
+    {
+        foreach (var p in PageThumbnails) p.IsSelected = true;
+    }
+
+    [RelayCommand]
+    private void ClearPageSelection()
+    {
+        foreach (var p in PageThumbnails) p.IsSelected = false;
+    }
+
+    [RelayCommand]
+    private void InvertPageSelection()
+    {
+        foreach (var p in PageThumbnails) p.IsSelected = !p.IsSelected;
+    }
+
+    [RelayCommand]
+    private async Task OpenZoomPreview(PageThumbnailItem? item)
+    {
+        if (item == null || SelectedFile == null) return;
+        try
+        {
+            var bytes = await _rendererService.RenderPageAsync(SelectedFile.FullPath, item.PageIndex, 1400);
+            if (bytes.Length > 0)
+            {
+                PreviewZoomImage = CreateBitmapSource(bytes);
+                IsPreviewZoomOpen = true;
+            }
+        }
+        catch { }
+    }
+
+    [RelayCommand]
+    private void CloseZoomPreview()
+    {
+        IsPreviewZoomOpen = false;
+        PreviewZoomImage = null;
+    }
+
+    [RelayCommand]
+    private async Task DeleteSelectedVisualPagesAsync()
+    {
+        var targetFile = GetTargetFile();
+        if (targetFile == null) return;
+
+        var selectedIndices = PageThumbnails.Where(p => p.IsSelected).Select(p => p.PageIndex).ToList();
+        if (selectedIndices.Count == 0)
+        {
+            MessageBox.Show("Marque as caixas de seleção das páginas que deseja excluir no visualizador de miniaturas.", "Seleção Vazia", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            string folder = Path.GetDirectoryName(targetFile.FullPath)!;
+            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(targetFile.FullPath)}_paginas_removidas.pdf");
+
+            await _pdfService.DeletePagesAsync(targetFile.FullPath, outPath, selectedIndices);
+            LastOutputFilePath = outPath;
+            StatusMessage = $"{selectedIndices.Count} página(s) excluída(s) com sucesso na mesma pasta!";
+            NotifyCompletion(outPath);
+            await LoadThumbnailsAsync(outPath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro ao excluir páginas: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ExtractSelectedVisualPagesAsync()
+    {
+        var targetFile = GetTargetFile();
+        if (targetFile == null) return;
+
+        var selectedIndices = PageThumbnails.Where(p => p.IsSelected).Select(p => p.PageIndex).ToList();
+        if (selectedIndices.Count == 0)
+        {
+            MessageBox.Show("Marque as caixas de seleção das páginas que deseja extrair no visualizador de miniaturas.", "Seleção Vazia", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            string folder = Path.GetDirectoryName(targetFile.FullPath)!;
+            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(targetFile.FullPath)}_extraido.pdf");
+
+            await _pdfService.ExtractPagesAsync(targetFile.FullPath, outPath, selectedIndices);
+            LastOutputFilePath = outPath;
+            StatusMessage = $"{selectedIndices.Count} página(s) extraída(s) com sucesso na mesma pasta!";
+            NotifyCompletion(outPath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro ao extrair páginas: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private static BitmapSource CreateBitmapSource(byte[] bytes)
+    {
+        using var stream = new MemoryStream(bytes);
+        var bitmap = new BitmapImage();
+        bitmap.BeginInit();
+        bitmap.CacheOption = BitmapCacheOption.OnLoad;
+        bitmap.StreamSource = stream;
+        bitmap.EndInit();
+        bitmap.Freeze();
+        return bitmap;
+    }
+
+    #endregion
+
+    #region Gerenciamento da Fila de Arquivos
 
     [RelayCommand]
     private void AddFiles()
@@ -163,6 +396,7 @@ public partial class BatchProcessingViewModel : ObservableObject
     {
         Files.Clear();
         SelectedFile = null;
+        PageThumbnails.Clear();
         StatusMessage = "Lista de arquivos limpa.";
         LastOutputFilePath = null;
     }
@@ -173,10 +407,7 @@ public partial class BatchProcessingViewModel : ObservableObject
         if (SelectedFile != null)
         {
             int index = Files.IndexOf(SelectedFile);
-            if (index > 0)
-            {
-                Files.Move(index, index - 1);
-            }
+            if (index > 0) Files.Move(index, index - 1);
         }
     }
 
@@ -186,16 +417,22 @@ public partial class BatchProcessingViewModel : ObservableObject
         if (SelectedFile != null)
         {
             int index = Files.IndexOf(SelectedFile);
-            if (index >= 0 && index < Files.Count - 1)
-            {
-                Files.Move(index, index + 1);
-            }
+            if (index >= 0 && index < Files.Count - 1) Files.Move(index, index + 1);
         }
+    }
+
+    [RelayCommand]
+    private void SortFilesByName()
+    {
+        var sorted = Files.OrderBy(f => f.FileName).ToList();
+        Files.Clear();
+        foreach (var f in sorted) Files.Add(f);
+        SelectedFile = Files.FirstOrDefault();
     }
 
     #endregion
 
-    #region Operações Salvas Diretamente NA MESMA PASTA
+    #region CATEGORIA A: Manipulação Avançada de Páginas
 
     [RelayCommand]
     private async Task MergeFilesAsync()
@@ -212,7 +449,6 @@ public partial class BatchProcessingViewModel : ObservableObject
             StatusMessage = "Mesclando documentos...";
             var progress = new Progress<double>(p => ProgressValue = p);
 
-            // Salva na MESMA PASTA do primeiro arquivo
             string firstFolder = Path.GetDirectoryName(Files[0].FullPath)!;
             string firstBaseName = Path.GetFileNameWithoutExtension(Files[0].FullPath);
             string destination = Path.Combine(firstFolder, $"{firstBaseName}_mesclado.pdf");
@@ -221,7 +457,7 @@ public partial class BatchProcessingViewModel : ObservableObject
             string result = await _pdfService.MergeFilesAsync(paths, destination, progress);
 
             LastOutputFilePath = result;
-            StatusMessage = $"PDF mesclado com sucesso na mesma pasta!";
+            StatusMessage = "PDF mesclado com sucesso na mesma pasta!";
             NotifyCompletion(result);
         }
         catch (Exception ex)
@@ -244,7 +480,7 @@ public partial class BatchProcessingViewModel : ObservableObject
         var ranges = ParseRanges(SplitRangesText);
         if (ranges.Count == 0)
         {
-            MessageBox.Show("Informe os intervalos de páginas válidos (ex: 1-2, 3-5).", "Aviso", MessageBoxButton.OK, MessageBoxImage.Warning);
+            MessageBox.Show("Informe intervalos válidos (ex: 1-2, 3-5).", "Aviso", MessageBoxButton.OK, MessageBoxImage.Warning);
             return;
         }
 
@@ -260,13 +496,12 @@ public partial class BatchProcessingViewModel : ObservableObject
             if (resultList.Count > 0)
             {
                 LastOutputFilePath = resultList[0];
-                StatusMessage = $"{resultList.Count} partes geradas na mesma pasta do arquivo!";
+                StatusMessage = $"{resultList.Count} partes geradas na mesma pasta!";
                 NotifyCompletion(resultList[0], $"{resultList.Count} arquivos gerados na mesma pasta!");
             }
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Erro: {ex.Message}";
             MessageBox.Show($"Falha ao dividir: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
@@ -300,19 +535,25 @@ public partial class BatchProcessingViewModel : ObservableObject
 
             var meta = await _pdfService.ReadMetadataAsync(targetFile.FullPath);
             var rotations = new Dictionary<int, int>();
-            for (int i = 0; i < meta.PageCount; i++)
+
+            var selectedIndices = PageThumbnails.Where(p => p.IsSelected).Select(p => p.PageIndex).ToList();
+            if (selectedIndices.Count > 0)
             {
-                rotations[i] = angle;
+                foreach (var idx in selectedIndices) rotations[idx] = angle;
+            }
+            else
+            {
+                for (int i = 0; i < meta.PageCount; i++) rotations[i] = angle;
             }
 
             await _pdfService.RotatePagesAsync(targetFile.FullPath, outPath, rotations);
             LastOutputFilePath = outPath;
             StatusMessage = $"Páginas rotacionadas em {angle}° salvas na mesma pasta!";
             NotifyCompletion(outPath);
+            await LoadThumbnailsAsync(outPath);
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Erro: {ex.Message}";
             MessageBox.Show($"Erro ao girar: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
@@ -346,10 +587,10 @@ public partial class BatchProcessingViewModel : ObservableObject
             LastOutputFilePath = outPath;
             StatusMessage = "Páginas removidas com sucesso na mesma pasta!";
             NotifyCompletion(outPath);
+            await LoadThumbnailsAsync(outPath);
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Erro: {ex.Message}";
             MessageBox.Show($"Erro ao excluir páginas: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
@@ -386,7 +627,6 @@ public partial class BatchProcessingViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Erro: {ex.Message}";
             MessageBox.Show($"Erro ao extrair páginas: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
@@ -396,43 +636,92 @@ public partial class BatchProcessingViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task CompressFilesAsync()
+    private async Task CropPagesAsync()
     {
-        if (Files.Count == 0)
-        {
-            MessageBox.Show("Adicione arquivos para comprimir.", "Aviso", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
-        var profile = new CompressionProfile(150, 75, true, true);
-        IsBusy = true;
-        StatusMessage = "Comprimindo e reduzindo tamanho...";
+        var targetFile = GetTargetFile();
+        if (targetFile == null) return;
 
         try
         {
-            int count = 0;
-            string lastOut = string.Empty;
-            foreach (var item in Files)
-            {
-                item.Status = "Comprimindo...";
-                string folder = Path.GetDirectoryName(item.FullPath)!;
-                string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(item.FullPath)}_comprimido.pdf");
+            IsBusy = true;
+            StatusMessage = "Ajustando margens e recorte...";
 
-                await _pdfService.CompressPdfAsync(item.FullPath, outPath, profile);
-                item.Status = "Concluído";
-                count++;
-                lastOut = outPath;
-                ProgressValue = (double)count / Files.Count * 100.0;
-            }
+            double pt = CropMarginMm * 2.83465; // Converte mm para pontos tipográficos
+            var margins = new PageCropMargins(pt, pt, pt, pt);
 
-            LastOutputFilePath = lastOut;
-            StatusMessage = $"{count} arquivo(s) comprimido(s) com sucesso na mesma pasta!";
-            NotifyCompletion(lastOut);
+            string folder = Path.GetDirectoryName(targetFile.FullPath)!;
+            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(targetFile.FullPath)}_recortado.pdf");
+
+            await _pdfService.CropPagesAsync(targetFile.FullPath, outPath, margins);
+            LastOutputFilePath = outPath;
+            StatusMessage = "Margens ajustadas com sucesso na mesma pasta!";
+            NotifyCompletion(outPath);
+            await LoadThumbnailsAsync(outPath);
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Erro: {ex.Message}";
-            MessageBox.Show($"Erro na compressão: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"Erro ao recortar margens: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task GenerateNUpAsync()
+    {
+        var targetFile = GetTargetFile();
+        if (targetFile == null) return;
+
+        try
+        {
+            IsBusy = true;
+            StatusMessage = $"Gerando {NUpPages} páginas por folha...";
+
+            var config = new NUpConfiguration(NUpPages, true, true);
+            string folder = Path.GetDirectoryName(targetFile.FullPath)!;
+            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(targetFile.FullPath)}_{NUpPages}up.pdf");
+
+            await _pdfService.GenerateNUpAsync(targetFile.FullPath, outPath, config);
+            LastOutputFilePath = outPath;
+            StatusMessage = $"Documento {NUpPages}-Up gerado com sucesso na mesma pasta!";
+            NotifyCompletion(outPath);
+            await LoadThumbnailsAsync(outPath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro no N-Up: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task AddPageNumbersAsync()
+    {
+        var targetFile = GetTargetFile();
+        if (targetFile == null) return;
+
+        try
+        {
+            IsBusy = true;
+            StatusMessage = "Inserindo numeração de páginas...";
+
+            string folder = Path.GetDirectoryName(targetFile.FullPath)!;
+            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(targetFile.FullPath)}_numerado.pdf");
+
+            await _pdfService.AddPageNumbersAsync(targetFile.FullPath, outPath, PageNumberMask, PageNumberInHeader);
+            LastOutputFilePath = outPath;
+            StatusMessage = "Numeração aplicada com sucesso na mesma pasta!";
+            NotifyCompletion(outPath);
+            await LoadThumbnailsAsync(outPath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro na paginação: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -481,7 +770,6 @@ public partial class BatchProcessingViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Erro: {ex.Message}";
             MessageBox.Show($"Erro: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
@@ -491,7 +779,7 @@ public partial class BatchProcessingViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private async Task AddPageNumbersAsync()
+    private async Task FlattenDocumentAsync()
     {
         var targetFile = GetTargetFile();
         if (targetFile == null) return;
@@ -499,20 +787,175 @@ public partial class BatchProcessingViewModel : ObservableObject
         try
         {
             IsBusy = true;
-            StatusMessage = "Inserindo numeração de páginas...";
+            StatusMessage = "Achatando camadas e formulários...";
 
             string folder = Path.GetDirectoryName(targetFile.FullPath)!;
-            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(targetFile.FullPath)}_numerado.pdf");
+            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(targetFile.FullPath)}_achatado.pdf");
 
-            await _pdfService.AddPageNumbersAsync(targetFile.FullPath, outPath, PageNumberMask, PageNumberInHeader);
+            await _pdfService.FlattenDocumentAsync(targetFile.FullPath, outPath);
             LastOutputFilePath = outPath;
-            StatusMessage = "Numeração aplicada com sucesso na mesma pasta!";
+            StatusMessage = "Camadas achatadas com sucesso na mesma pasta!";
             NotifyCompletion(outPath);
+            await LoadThumbnailsAsync(outPath);
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Erro: {ex.Message}";
-            MessageBox.Show($"Erro na paginação: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+            MessageBox.Show($"Erro ao achatar: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    #endregion
+
+    #region CATEGORIA B: Revisão, Anotações e Formulários
+
+    [RelayCommand]
+    private async Task ApplyRedactionAsync()
+    {
+        var targetFile = GetTargetFile();
+        if (targetFile == null) return;
+
+        var selectedIndices = PageThumbnails.Where(p => p.IsSelected).Select(p => p.PageIndex).ToList();
+        int pageIdx = selectedIndices.FirstOrDefault();
+
+        try
+        {
+            IsBusy = true;
+            StatusMessage = "Aplicando tarjamento permanente (LGPD)...";
+
+            var areas = new List<RedactionArea>
+            {
+                new RedactionArea(pageIdx, 50, 100, 250, 30)
+            };
+
+            string folder = Path.GetDirectoryName(targetFile.FullPath)!;
+            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(targetFile.FullPath)}_tarjado.pdf");
+
+            await _pdfService.ApplyRedactionAsync(targetFile.FullPath, outPath, areas);
+            LastOutputFilePath = outPath;
+            StatusMessage = "Tarjamento irreversível aplicado na mesma pasta!";
+            NotifyCompletion(outPath);
+            await LoadThumbnailsAsync(outPath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro no tarjamento: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task AddTextMarkupAsync()
+    {
+        var targetFile = GetTargetFile();
+        if (targetFile == null) return;
+
+        try
+        {
+            IsBusy = true;
+            StatusMessage = $"Aplicando anotação ({SelectedMarkupType})...";
+
+            var markups = new List<TextMarkupItem>
+            {
+                new TextMarkupItem(0, MarkupText, SelectedMarkupType, 60, 80, 200, 24, "#FFE082")
+            };
+
+            string folder = Path.GetDirectoryName(targetFile.FullPath)!;
+            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(targetFile.FullPath)}_anotado.pdf");
+
+            await _pdfService.AddTextMarkupAsync(targetFile.FullPath, outPath, markups);
+            LastOutputFilePath = outPath;
+            StatusMessage = "Marcação visual aplicada na mesma pasta!";
+            NotifyCompletion(outPath);
+            await LoadThumbnailsAsync(outPath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro ao aplicar anotação: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    #endregion
+
+    #region CATEGORIA C: Certificação Digital & Segurança
+
+    [RelayCommand]
+    private async Task SignDocumentAsync()
+    {
+        var targetFile = GetTargetFile();
+        if (targetFile == null) return;
+
+        if (SelectedCertificate == null)
+        {
+            MessageBox.Show("Nenhum certificado digital selecionado. Conecte seu token A3 ou instale seu certificado A1 no Windows.", "Certificado Requerido", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusMessage = "Assinando documento com ICP-Brasil...";
+
+            string folder = Path.GetDirectoryName(targetFile.FullPath)!;
+            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(targetFile.FullPath)}_assinado.pdf");
+
+            await _signatureService.SignPdfAsync(targetFile.FullPath, outPath, SelectedCertificate, reason: SignatureReason);
+            LastOutputFilePath = outPath;
+            StatusMessage = "Documento assinado digitalmente com sucesso na mesma pasta!";
+            NotifyCompletion(outPath);
+            await LoadThumbnailsAsync(outPath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro ao assinar documento: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task QuickSignImageAsync()
+    {
+        var targetFile = GetTargetFile();
+        if (targetFile == null) return;
+
+        var dialog = new OpenFileDialog
+        {
+            Title = "Selecionar Imagem da Assinatura (PNG transparente)",
+            Filter = "Imagens (*.png;*.jpg)|*.png;*.jpg|Todos os Arquivos (*.*)|*.*"
+        };
+
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            IsBusy = true;
+            StatusMessage = "Inserindo carimbo de assinatura...";
+
+            string folder = Path.GetDirectoryName(targetFile.FullPath)!;
+            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(targetFile.FullPath)}_com_assinatura.pdf");
+
+            await _pdfService.AddImageStampAsync(targetFile.FullPath, outPath, dialog.FileName, 0, 50, 700, 160, 60);
+            LastOutputFilePath = outPath;
+            StatusMessage = "Assinatura rápida inserida na mesma pasta!";
+            NotifyCompletion(outPath);
+            await LoadThumbnailsAsync(outPath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro ao inserir assinatura: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -561,7 +1004,6 @@ public partial class BatchProcessingViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Erro: {ex.Message}";
             MessageBox.Show($"Erro ao proteger: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
@@ -592,12 +1034,11 @@ public partial class BatchProcessingViewModel : ObservableObject
 
             await _pdfService.UnlockPdfAsync(targetFile.FullPath, outPath, UnlockPassword);
             LastOutputFilePath = outPath;
-            StatusMessage = "Senha removida com sucesso! Arquivo desbloqueado salvo na mesma pasta.";
+            StatusMessage = "Senha removida com sucesso! Salvo na mesma pasta.";
             NotifyCompletion(outPath);
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Erro: {ex.Message}";
             MessageBox.Show($"Erro ao desbloquear: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
@@ -641,44 +1082,7 @@ public partial class BatchProcessingViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Erro: {ex.Message}";
             MessageBox.Show($"Erro: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
-        }
-        finally
-        {
-            IsBusy = false;
-        }
-    }
-
-    [RelayCommand]
-    private async Task SignDocumentAsync()
-    {
-        var targetFile = GetTargetFile();
-        if (targetFile == null) return;
-
-        if (SelectedCertificate == null)
-        {
-            MessageBox.Show("Nenhum certificado digital selecionado. Conecte seu token A3 ou instale seu certificado A1 no Windows.", "Certificado Requerido", MessageBoxButton.OK, MessageBoxImage.Warning);
-            return;
-        }
-
-        try
-        {
-            IsBusy = true;
-            StatusMessage = "Assinando documento com ICP-Brasil...";
-
-            string folder = Path.GetDirectoryName(targetFile.FullPath)!;
-            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(targetFile.FullPath)}_assinado.pdf");
-
-            await _signatureService.SignPdfAsync(targetFile.FullPath, outPath, SelectedCertificate, reason: SignatureReason);
-            LastOutputFilePath = outPath;
-            StatusMessage = "Documento assinado digitalmente com sucesso na mesma pasta!";
-            NotifyCompletion(outPath);
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"Erro: {ex.Message}";
-            MessageBox.Show($"Erro ao assinar documento: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
         }
         finally
         {
@@ -699,9 +1103,252 @@ public partial class BatchProcessingViewModel : ObservableObject
             }
             SelectedCertificate = AvailableCertificates.FirstOrDefault();
         }
-        catch
+        catch { }
+    }
+
+    #endregion
+
+    #region CATEGORIA D: Otimização & Engenharia de Arquivos
+
+    [RelayCommand]
+    private async Task CompressFilesAsync()
+    {
+        if (Files.Count == 0)
         {
-            // Repositório de certificados sem itens
+            MessageBox.Show("Adicione arquivos para comprimir.", "Aviso", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        int dpi = SelectedCompressionProfile == "Máximo" ? 100 : (SelectedCompressionProfile == "Leve" ? 200 : 150);
+        int quality = SelectedCompressionProfile == "Máximo" ? 60 : (SelectedCompressionProfile == "Leve" ? 85 : 75);
+        var profile = new CompressionProfile(dpi, quality, true, true);
+
+        IsBusy = true;
+        StatusMessage = $"Comprimindo com perfil {SelectedCompressionProfile}...";
+
+        try
+        {
+            int count = 0;
+            string lastOut = string.Empty;
+            foreach (var item in Files)
+            {
+                item.Status = "Comprimindo...";
+                string folder = Path.GetDirectoryName(item.FullPath)!;
+                string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(item.FullPath)}_comprimido.pdf");
+
+                await _pdfService.CompressPdfAsync(item.FullPath, outPath, profile);
+                item.Status = "Concluído";
+                count++;
+                lastOut = outPath;
+                ProgressValue = (double)count / Files.Count * 100.0;
+            }
+
+            LastOutputFilePath = lastOut;
+            StatusMessage = $"{count} arquivo(s) comprimido(s) com sucesso na mesma pasta!";
+            NotifyCompletion(lastOut);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro na compressão: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task RepairPdfAsync()
+    {
+        var targetFile = GetTargetFile();
+        if (targetFile == null) return;
+
+        try
+        {
+            IsBusy = true;
+            StatusMessage = "Reconstruindo estrutura do PDF...";
+
+            string folder = Path.GetDirectoryName(targetFile.FullPath)!;
+            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(targetFile.FullPath)}_reparado.pdf");
+
+            await _pdfService.RepairPdfAsync(targetFile.FullPath, outPath);
+            LastOutputFilePath = outPath;
+            StatusMessage = "Arquivo reparado e reconstruído com sucesso na mesma pasta!";
+            NotifyCompletion(outPath);
+            await LoadThumbnailsAsync(outPath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro ao reparar PDF: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task CompareDocumentsAsync()
+    {
+        if (Files.Count < 2)
+        {
+            MessageBox.Show("Adicione pelo menos 2 arquivos PDF na lista para comparar versões.", "Aviso", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusMessage = "Comparando documentos...";
+
+            var res = await _pdfService.CompareDocumentsAsync(Files[0].FullPath, Files[1].FullPath);
+            ComparisonResultText = res.Summary;
+            MessageBox.Show(res.Summary, "Resultado da Comparação", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro ao comparar: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    #endregion
+
+    #region CATEGORIA E: Conversão, OCR e Imagens
+
+    [RelayCommand]
+    private async Task ConvertImagesToPdfAsync()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Selecionar Imagens para Converter em PDF",
+            Filter = "Imagens (*.jpg;*.jpeg;*.png;*.bmp)|*.jpg;*.jpeg;*.png;*.bmp|Todos os Arquivos (*.*)|*.*",
+            Multiselect = true
+        };
+
+        if (dialog.ShowDialog() != true) return;
+
+        try
+        {
+            IsBusy = true;
+            StatusMessage = "Convertendo imagens em PDF...";
+
+            string firstFolder = Path.GetDirectoryName(dialog.FileNames[0])!;
+            string outPath = Path.Combine(firstFolder, "Imagens_Convertidas.pdf");
+
+            await _pdfService.ConvertImagesToPdfAsync(dialog.FileNames, outPath);
+            LastOutputFilePath = outPath;
+            AddFilePaths(new[] { outPath });
+            StatusMessage = "Imagens convertidas em PDF com sucesso na mesma pasta!";
+            NotifyCompletion(outPath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro na conversão de imagens: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ExportPdfToImagesAsync()
+    {
+        var targetFile = GetTargetFile();
+        if (targetFile == null) return;
+
+        try
+        {
+            IsBusy = true;
+            StatusMessage = "Exportando páginas para imagens PNG...";
+
+            string folder = Path.GetDirectoryName(targetFile.FullPath)!;
+            string subFolder = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(targetFile.FullPath)}_imagens");
+            Directory.CreateDirectory(subFolder);
+
+            var thumbs = await _rendererService.RenderThumbnailsAsync(targetFile.FullPath, 1600);
+            int count = 0;
+            foreach (var t in thumbs)
+            {
+                string imgFile = Path.Combine(subFolder, $"pagina_{t.PageNumber:D3}.png");
+                File.WriteAllBytes(imgFile, t.ImageBytes);
+                count++;
+            }
+
+            LastOutputFilePath = Path.Combine(subFolder, "pagina_001.png");
+            StatusMessage = $"{count} imagem(ns) PNG exportada(s) com sucesso na pasta!";
+            NotifyCompletion(subFolder, $"{count} páginas exportadas como imagens PNG na pasta:\n{subFolder}");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro ao exportar imagens: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task OcrPdfAsync()
+    {
+        var targetFile = GetTargetFile();
+        if (targetFile == null) return;
+
+        try
+        {
+            IsBusy = true;
+            StatusMessage = "Processando OCR pesquisável (Windows Media OCR)...";
+
+            string folder = Path.GetDirectoryName(targetFile.FullPath)!;
+            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(targetFile.FullPath)}_pesquisavel.pdf");
+
+            await _ocrService.CreateSearchablePdfAsync(targetFile.FullPath, outPath, "pt");
+            LastOutputFilePath = outPath;
+            StatusMessage = "PDF pesquisável gerado com sucesso na mesma pasta!";
+            NotifyCompletion(outPath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro no OCR: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task ExportTextReportAsync()
+    {
+        var targetFile = GetTargetFile();
+        if (targetFile == null) return;
+
+        try
+        {
+            IsBusy = true;
+            StatusMessage = "Extraindo texto e metadados...";
+
+            string text = await _pdfService.ExtractAllTextAsync(targetFile.FullPath);
+            string folder = Path.GetDirectoryName(targetFile.FullPath)!;
+            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(targetFile.FullPath)}_resumo.txt");
+
+            File.WriteAllText(outPath, text);
+            LastOutputFilePath = outPath;
+            StatusMessage = "Relatório em texto exportado na mesma pasta!";
+            NotifyCompletion(outPath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro ao extrair texto: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
         }
     }
 
@@ -727,7 +1374,7 @@ public partial class BatchProcessingViewModel : ObservableObject
     [RelayCommand]
     private void OpenLastOutputFile()
     {
-        if (!string.IsNullOrEmpty(LastOutputFilePath) && File.Exists(LastOutputFilePath))
+        if (!string.IsNullOrEmpty(LastOutputFilePath) && (File.Exists(LastOutputFilePath) || Directory.Exists(LastOutputFilePath)))
         {
             try
             {
@@ -735,7 +1382,7 @@ public partial class BatchProcessingViewModel : ObservableObject
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Não foi possível abrir o arquivo: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+                MessageBox.Show($"Não foi possível abrir: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
     }
@@ -745,7 +1392,7 @@ public partial class BatchProcessingViewModel : ObservableObject
     {
         if (!string.IsNullOrEmpty(LastOutputFilePath))
         {
-            string? folder = Path.GetDirectoryName(LastOutputFilePath);
+            string? folder = Directory.Exists(LastOutputFilePath) ? LastOutputFilePath : Path.GetDirectoryName(LastOutputFilePath);
             if (!string.IsNullOrEmpty(folder) && Directory.Exists(folder))
             {
                 try
@@ -812,7 +1459,7 @@ public partial class BatchProcessingViewModel : ObservableObject
                 {
                     for (int i = Math.Min(start, end); i <= Math.Max(start, end); i++)
                     {
-                        if (i > 0) result.Add(i - 1); // Converte para zero-based
+                        if (i > 0) result.Add(i - 1);
                     }
                 }
             }

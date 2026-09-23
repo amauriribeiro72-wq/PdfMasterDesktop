@@ -30,6 +30,7 @@ public partial class App : Application
     {
         // Serviços de Infraestrutura
         services.AddSingleton<IPdfService, PdfService>();
+        services.AddSingleton<IPdfRendererService, WindowsPdfRendererService>();
         services.AddSingleton<IOcrService, WindowsOcrService>();
         services.AddSingleton<IDigitalSignatureService, WindowsSignatureService>();
 

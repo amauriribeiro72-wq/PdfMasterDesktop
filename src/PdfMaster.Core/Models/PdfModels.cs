@@ -32,3 +32,15 @@ public record DigitalCertificateInfo(
     DateTime NotAfter,
     bool HasPrivateKey
 );
+
+public record PageThumbnail(int PageIndex, int PageNumber, byte[] ImageBytes, double Width, double Height);
+
+public record RedactionArea(int PageIndex, double X, double Y, double Width, double Height);
+
+public record NUpConfiguration(int PagesPerSheet, bool DrawBorder = true, bool Landscape = true);
+
+public record FormFieldInfo(string Name, string Value, string FieldType, bool IsReadOnly);
+
+public record DocumentComparisonResult(bool Identical, int PageCount1, int PageCount2, long Size1, long Size2, string Summary);
+
+public record TextMarkupItem(int PageIndex, string Text, string MarkupType, double X, double Y, double Width, double Height, string? ColorHex);

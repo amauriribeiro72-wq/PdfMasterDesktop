@@ -4,8 +4,8 @@
         xmlns:views="clr-namespace:PdfMaster.App.Views"
         xmlns:vm="clr-namespace:PdfMaster.App.ViewModels"
         Title="PDF Master Pro - Edição Desktop (Offline &amp; Seguro)"
-        Height="740" Width="1120"
-        MinHeight="600" MinWidth="880"
+        Height="820" Width="1240"
+        MinHeight="650" MinWidth="950"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource AppBackgroundBrush}">
 
