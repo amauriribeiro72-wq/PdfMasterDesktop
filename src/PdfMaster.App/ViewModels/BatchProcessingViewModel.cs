@@ -56,6 +56,15 @@ public class PageThumbnailItem : ObservableObject
     }
 }
 
+public class StampTemplateItem : ObservableObject
+{
+    public string Name { get; set; } = string.Empty;
+    public string Subtitle { get; set; } = string.Empty;
+    public string ImagePath { get; set; } = string.Empty;
+    public string ColorHex { get; set; } = "#16A34A";
+    public BitmapSource? Preview { get; set; }
+}
+
 public partial class BatchProcessingViewModel : ObservableObject
 {
     private readonly IPdfService _pdfService;
@@ -84,6 +93,60 @@ public partial class BatchProcessingViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _isPreviewZoomOpen;
+
+    // Editor de Carimbos Visuais Interativos
+    [ObservableProperty]
+    private ObservableCollection<StampTemplateItem> _availableStamps = new();
+
+    [ObservableProperty]
+    private StampTemplateItem? _selectedStamp;
+
+    [ObservableProperty]
+    private BitmapSource? _currentStampPreviewImage;
+
+    [ObservableProperty]
+    private bool _isStampEditorOpen;
+
+    [ObservableProperty]
+    private BitmapSource? _stampEditorPageImage;
+
+    [ObservableProperty]
+    private int _stampCurrentPageIndex;
+
+    [ObservableProperty]
+    private int _stampTotalPages = 1;
+
+    [ObservableProperty]
+    private string _stampPageIndicator = "Página 1 de 1";
+
+    [ObservableProperty]
+    private double _stampX = 60;
+
+    [ObservableProperty]
+    private double _stampY = 80;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StampHalfWidth))]
+    private double _stampWidth = 190;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(StampHalfHeight))]
+    private double _stampHeight = 72;
+
+    [ObservableProperty]
+    private double _stampRotation = 0;
+
+    [ObservableProperty]
+    private double _stampOpacity = 1.0;
+
+    [ObservableProperty]
+    private double _canvasRenderWidth = 430;
+
+    [ObservableProperty]
+    private double _canvasRenderHeight = 600;
+
+    public double StampHalfWidth => StampWidth / 2.0;
+    public double StampHalfHeight => StampHeight / 2.0;
 
     // Categoria A: Páginas
     [ObservableProperty]
@@ -170,6 +233,7 @@ public partial class BatchProcessingViewModel : ObservableObject
         _signatureService = signatureService;
         _ocrService = ocrService;
         LoadCertificates();
+        InitializeStamps();
     }
 
     partial void OnSelectedFileChanged(BatchFileItem? value)
@@ -1469,6 +1533,289 @@ public partial class BatchProcessingViewModel : ObservableObject
             }
         }
         return result.OrderBy(x => x).ToList();
+    }
+
+    #endregion
+
+    #region Editor de Carimbos Visuais Interativos (Pago, Quitado, Concluído...)
+
+    private void InitializeStamps()
+    {
+        try
+        {
+            AvailableStamps.Clear();
+            string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            string stampsFolder = Path.Combine(baseDir, "Assets", "Stamps");
+
+            if (!Directory.Exists(stampsFolder))
+            {
+                var altFolder = Path.Combine(baseDir, "..", "..", "..", "Assets", "Stamps");
+                if (Directory.Exists(altFolder)) stampsFolder = Path.GetFullPath(altFolder);
+            }
+
+            var stampDefs = new[]
+            {
+                ("PAGO", "DOCUMENTO LIQUIDADO", "pago.png", "#16A34A"),
+                ("CONCLUÍDO", "PROCESSO FINALIZADO", "concluido.png", "#2563EB"),
+                ("FINALIZADO", "ETAPA CONCLUÍDA", "finalizado.png", "#4F46E5"),
+                ("QUITADO", "PAGAMENTO CONFIRMADO", "quitado.png", "#0D9488"),
+                ("APROVADO", "VALIDADO & AUTORIZADO", "aprovado.png", "#059669"),
+                ("URGENTE", "PRIORIDADE MÁXIMA", "urgente.png", "#DC2626"),
+                ("CONFIDENCIAL", "ACESSO RESTRITO", "confidencial.png", "#D97706"),
+                ("CANCELADO", "ANULADO / SEM EFEITO", "cancelado.png", "#E11D48"),
+            };
+
+            foreach (var def in stampDefs)
+            {
+                string filePath = Path.Combine(stampsFolder, def.Item3);
+                BitmapSource? preview = null;
+                if (File.Exists(filePath))
+                {
+                    try
+                    {
+                        var bytes = File.ReadAllBytes(filePath);
+                        preview = CreateBitmapSource(bytes);
+                    }
+                    catch { }
+                }
+
+                AvailableStamps.Add(new StampTemplateItem
+                {
+                    Name = def.Item1,
+                    Subtitle = def.Item2,
+                    ImagePath = filePath,
+                    ColorHex = def.Item4,
+                    Preview = preview
+                });
+            }
+
+            if (AvailableStamps.Count > 0)
+            {
+                SelectedStamp = AvailableStamps[0];
+                CurrentStampPreviewImage = SelectedStamp.Preview;
+            }
+        }
+        catch { }
+    }
+
+    [RelayCommand]
+    private void SelectStamp(StampTemplateItem? item)
+    {
+        if (item == null) return;
+        SelectedStamp = item;
+        CurrentStampPreviewImage = item.Preview;
+    }
+
+    [RelayCommand]
+    private void UploadCustomStamp()
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Selecionar Carimbo Personalizado (PNG ou JPG)",
+            Filter = "Imagens (*.png;*.jpg;*.jpeg)|*.png;*.jpg;*.jpeg|Todos os Arquivos (*.*)|*.*"
+        };
+
+        if (dialog.ShowDialog() == true && File.Exists(dialog.FileName))
+        {
+            try
+            {
+                var bytes = File.ReadAllBytes(dialog.FileName);
+                var bmp = CreateBitmapSource(bytes);
+
+                var customItem = new StampTemplateItem
+                {
+                    Name = Path.GetFileNameWithoutExtension(dialog.FileName),
+                    Subtitle = "Personalizado",
+                    ImagePath = dialog.FileName,
+                    ColorHex = "#3B82F6",
+                    Preview = bmp
+                };
+
+                AvailableStamps.Insert(0, customItem);
+                SelectedStamp = customItem;
+                CurrentStampPreviewImage = bmp;
+                StatusMessage = $"Carimbo personalizado '{customItem.Name}' carregado!";
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Erro ao carregar imagem: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+    }
+
+    [RelayCommand]
+    private void SetStampRotation(string? angleStr)
+    {
+        if (double.TryParse(angleStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out double angle))
+        {
+            StampRotation = angle;
+        }
+    }
+
+    [RelayCommand]
+    private async Task OpenStampEditor(PageThumbnailItem? thumbnail = null)
+    {
+        var target = GetTargetFile();
+        if (target == null)
+        {
+            MessageBox.Show("Adicione ou selecione um arquivo PDF primeiro.", "Aviso", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        int targetIndex = 0;
+        if (thumbnail != null)
+        {
+            targetIndex = thumbnail.PageIndex;
+        }
+        else if (SelectedThumbnail != null)
+        {
+            targetIndex = SelectedThumbnail.PageIndex;
+        }
+
+        StampCurrentPageIndex = targetIndex;
+        StampTotalPages = Math.Max(1, PageThumbnails.Count);
+        StampPageIndicator = $"Página {StampCurrentPageIndex + 1} de {StampTotalPages}";
+
+        await LoadStampEditorPageAsync();
+        IsStampEditorOpen = true;
+    }
+
+    private async Task LoadStampEditorPageAsync()
+    {
+        if (SelectedFile == null) return;
+        try
+        {
+            IsBusy = true;
+            StatusMessage = $"Renderizando página {StampCurrentPageIndex + 1} para carimbo...";
+            var bytes = await _rendererService.RenderPageAsync(SelectedFile.FullPath, StampCurrentPageIndex, 1200);
+            if (bytes.Length > 0)
+            {
+                var bmp = CreateBitmapSource(bytes);
+                StampEditorPageImage = bmp;
+
+                // Ajusta proporção do Canvas para coincidir exatamente com a página renderizada
+                double targetH = 580;
+                double ratio = bmp.PixelWidth / (double)bmp.PixelHeight;
+                CanvasRenderHeight = targetH;
+                CanvasRenderWidth = Math.Round(targetH * ratio);
+
+                // Posiciona o carimbo inicialmente em um local visível
+                StampX = Math.Max(20, (CanvasRenderWidth - StampWidth) / 2);
+                StampY = Math.Max(40, CanvasRenderHeight - StampHeight - 60);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro ao carregar página: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task NextStampPageAsync()
+    {
+        if (StampCurrentPageIndex < StampTotalPages - 1)
+        {
+            StampCurrentPageIndex++;
+            StampPageIndicator = $"Página {StampCurrentPageIndex + 1} de {StampTotalPages}";
+            await LoadStampEditorPageAsync();
+        }
+    }
+
+    [RelayCommand]
+    private async Task PreviousStampPageAsync()
+    {
+        if (StampCurrentPageIndex > 0)
+        {
+            StampCurrentPageIndex--;
+            StampPageIndicator = $"Página {StampCurrentPageIndex + 1} de {StampTotalPages}";
+            await LoadStampEditorPageAsync();
+        }
+    }
+
+    [RelayCommand]
+    private void CloseStampEditor()
+    {
+        IsStampEditorOpen = false;
+    }
+
+    [RelayCommand]
+    private async Task ApplyInteractiveStampAsync()
+    {
+        var target = GetTargetFile();
+        if (target == null) return;
+
+        if (SelectedStamp == null || string.IsNullOrEmpty(SelectedStamp.ImagePath) || !File.Exists(SelectedStamp.ImagePath))
+        {
+            MessageBox.Show("Selecione um carimbo ou carregue uma imagem antes de aplicar.", "Aviso", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusMessage = "Aplicando carimbo no documento...";
+
+            string folder = Path.GetDirectoryName(target.FullPath)!;
+            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(target.FullPath)}_carimbado.pdf");
+
+            // Calcula proporções exatas relativas ao Canvas
+            double pctX = StampX / Math.Max(1.0, CanvasRenderWidth);
+            double pctY = StampY / Math.Max(1.0, CanvasRenderHeight);
+            double pctW = StampWidth / Math.Max(1.0, CanvasRenderWidth);
+            double pctH = StampHeight / Math.Max(1.0, CanvasRenderHeight);
+
+            // Lê as dimensões reais da página no PDF (Points: 72 dpi)
+            double pdfPageW = 595.0;
+            double pdfPageH = 842.0;
+
+            try
+            {
+                using var stream = File.OpenRead(target.FullPath);
+                using var doc = PdfSharpCore.Pdf.IO.PdfReader.Open(stream, PdfSharpCore.Pdf.IO.PdfDocumentOpenMode.Import);
+                if (StampCurrentPageIndex >= 0 && StampCurrentPageIndex < doc.PageCount)
+                {
+                    var page = doc.Pages[StampCurrentPageIndex];
+                    pdfPageW = page.Width.Point;
+                    pdfPageH = page.Height.Point;
+                }
+            }
+            catch { }
+
+            double realPdfX = pctX * pdfPageW;
+            double realPdfY = pctY * pdfPageH;
+            double realPdfW = pctW * pdfPageW;
+            double realPdfH = pctH * pdfPageH;
+
+            await _pdfService.AddImageStampAsync(
+                target.FullPath,
+                outPath,
+                SelectedStamp.ImagePath,
+                StampCurrentPageIndex,
+                realPdfX,
+                realPdfY,
+                realPdfW,
+                realPdfH,
+                StampRotation,
+                StampOpacity);
+
+            LastOutputFilePath = outPath;
+            StatusMessage = $"Carimbo '{SelectedStamp.Name}' aplicado com sucesso na mesma pasta!";
+            IsStampEditorOpen = false;
+            NotifyCompletion(outPath);
+            await LoadThumbnailsAsync(outPath);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Erro ao aplicar carimbo: {ex.Message}", "Erro", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
     }
 
     #endregion

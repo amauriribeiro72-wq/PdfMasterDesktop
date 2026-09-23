@@ -142,19 +142,27 @@
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="4"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="4"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <Button Grid.Column="0" Command="{Binding DeleteSelectedVisualPagesCommand}" Padding="6,4" Background="#FFF5F5" BorderBrush="#FFCDD2" Foreground="#C62828" ToolTip="Exclui as páginas marcadas">
+                                <Button Grid.Column="0" Command="{Binding DeleteSelectedVisualPagesCommand}" Padding="4,4" Background="#FFF5F5" BorderBrush="#FFCDD2" Foreground="#C62828" ToolTip="Exclui as páginas marcadas">
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="🗑️" Margin="0,0,4,0"/>
-                                        <TextBlock Text="Excluir Marcadas" FontSize="11" FontWeight="SemiBold"/>
+                                        <TextBlock Text="🗑️" Margin="0,0,3,0"/>
+                                        <TextBlock Text="Excluir" FontSize="11" FontWeight="SemiBold"/>
                                     </StackPanel>
                                 </Button>
-                                <Button Grid.Column="2" Command="{Binding ExtractSelectedVisualPagesCommand}" Padding="6,4" ToolTip="Gera novo PDF só com as páginas marcadas">
+                                <Button Grid.Column="2" Command="{Binding ExtractSelectedVisualPagesCommand}" Padding="4,4" ToolTip="Gera novo PDF só com as páginas marcadas">
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="📤" Margin="0,0,4,0"/>
-                                        <TextBlock Text="Extrair Marcadas" FontSize="11" FontWeight="SemiBold"/>
+                                        <TextBlock Text="📤" Margin="0,0,3,0"/>
+                                        <TextBlock Text="Extrair" FontSize="11" FontWeight="SemiBold"/>
+                                    </StackPanel>
+                                </Button>
+                                <Button Grid.Column="4" Command="{Binding OpenStampEditorCommand}" Padding="4,4" Background="#F0FDF4" BorderBrush="#BBF7D0" Foreground="#15803D" ToolTip="Carimbar página visualmente com alças (Pago, Quitado, Concluído...)">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="🏷️" Margin="0,0,3,0"/>
+                                        <TextBlock Text="Carimbar" FontSize="11" FontWeight="SemiBold"/>
                                     </StackPanel>
                                 </Button>
                             </Grid>
@@ -332,6 +340,31 @@
                     <TabItem Header="✍️ Revisão &amp; Tarjamento">
                         <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,10,0,0">
                             <StackPanel>
+                                <!-- Carimbos Administrativos & Visuais (Pago, Quitado, Concluído...) -->
+                                <Border Margin="0,0,0,10" Padding="12" Background="#F0FDF4" CornerRadius="8" BorderThickness="1" BorderBrush="#BBF7D0">
+                                    <StackPanel>
+                                        <Grid>
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="🏷️ Carimbos Administrativos &amp; Visuais" FontSize="14" FontWeight="Bold" Foreground="#15803D"/>
+                                                <Border Background="#DCFCE7" CornerRadius="4" Padding="6,1" Margin="8,0,0,0" VerticalAlignment="Center">
+                                                    <TextBlock Text="PAGO • QUITADO • CONCLUÍDO • FINALIZADO" FontSize="10" FontWeight="Bold" Foreground="#166534"/>
+                                                </Border>
+                                            </StackPanel>
+                                        </Grid>
+                                        <TextBlock Text="Carimbe faturas, recibos e processos com modelos prontos ou com seu próprio PNG, ajustando o tamanho com alças para enquadrar perfeitamente nos espaços em branco." FontSize="12" Foreground="#4B5563" Margin="0,4,0,10" TextWrapping="Wrap"/>
+                                        
+                                        <Grid Margin="0,0,0,4">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="8"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Button Grid.Column="0" Command="{Binding OpenStampEditorCommand}" Background="#16A34A" Foreground="White" FontWeight="Bold" Padding="14,9" Content="📌 Abrir Editor Visual de Carimbo na Página"/>
+                                            <Button Grid.Column="2" Command="{Binding UploadCustomStampCommand}" Padding="12,9" Content="📁 Carregar Imagem Própria..."/>
+                                        </Grid>
+                                    </StackPanel>
+                                </Border>
+
                                 <!-- Tarjamento Permanente (LGPD) -->
                                 <Border Margin="0,0,0,10" Padding="12" Background="#F9FAFB" CornerRadius="8" BorderThickness="1" BorderBrush="#E5E7EB">
                                     <StackPanel>
@@ -557,6 +590,174 @@
                     <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
                         <Image Source="{Binding PreviewZoomImage}" Stretch="Uniform"/>
                     </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Modal do Editor de Carimbo Visual Interativo com Alças -->
+        <Grid Grid.Row="0" Grid.RowSpan="3" Background="#B0000000" Visibility="{Binding IsStampEditorOpen, Converter={StaticResource BoolToVisConverter}}">
+            <Border Background="#F9FAFB" CornerRadius="12" Margin="16" Padding="14" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" BorderThickness="1" BorderBrush="#D1D5DB">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Barra Superior: Seleção de Carimbos, Rotação, Opacidade e Ações -->
+                    <Border Grid.Row="0" Background="White" CornerRadius="8" Padding="12,10" Margin="0,0,0,10" BorderThickness="1" BorderBrush="#E5E7EB">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <!-- Linha 1: Título, Navegação de Páginas e Botões de Ação -->
+                            <Grid Grid.Row="0" Margin="0,0,0,8">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="🏷️ Editor de Carimbo Visual" FontSize="15" FontWeight="Bold" Foreground="#111827"/>
+                                    <Border Background="#EFF6FF" CornerRadius="4" Padding="6,2" Margin="10,0,0,0">
+                                        <TextBlock Text="Arraste o carimbo livremente e puxe a alça vermelha para redimensionar" FontSize="11" Foreground="#1D4ED8" FontWeight="Medium"/>
+                                    </Border>
+                                </StackPanel>
+
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                    <!-- Navegador de Página -->
+                                    <Button Command="{Binding PreviousStampPageCommand}" Content="◀" Padding="8,4" Margin="0,0,4,0" ToolTip="Página Anterior"/>
+                                    <TextBlock Text="{Binding StampPageIndicator}" FontWeight="Bold" VerticalAlignment="Center" Margin="4,0" FontSize="12"/>
+                                    <Button Command="{Binding NextStampPageCommand}" Content="▶" Padding="8,4" Margin="4,0,14,0" ToolTip="Próxima Página"/>
+
+                                    <!-- Botões Principais -->
+                                    <Button Command="{Binding ApplyInteractiveStampCommand}" Background="#16A34A" Foreground="White" FontWeight="Bold" Padding="14,6" Margin="0,0,8,0" Content="✔ Aplicar Carimbo"/>
+                                    <Button Command="{Binding CloseStampEditorCommand}" Background="#F3F4F6" Padding="12,6" Content="✕ Fechar"/>
+                                </StackPanel>
+                            </Grid>
+
+                            <!-- Linha 2: Modelos de Carimbo em Botões Rápidos + Sliders -->
+                            <Grid Grid.Row="1">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+
+                                <!-- Carimbos Rápidos -->
+                                <ItemsControl Grid.Column="0" ItemsSource="{Binding AvailableStamps}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal"/>
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Command="{Binding DataContext.SelectStampCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                    CommandParameter="{Binding}"
+                                                    Margin="0,0,5,0" Padding="7,3" FontSize="11" FontWeight="Bold">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="🏷️ " FontSize="10"/>
+                                                    <TextBlock Text="{Binding Name}"/>
+                                                </StackPanel>
+                                            </Button>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <Button Grid.Column="1" HorizontalAlignment="Left" Command="{Binding UploadCustomStampCommand}" Margin="4,0,0,0" Padding="8,3" FontSize="11" Content="📁 Subir Meu PNG..."/>
+
+                                <!-- Ajustes de Rotação, Tamanho e Opacidade -->
+                                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="Rotação:" FontSize="11" VerticalAlignment="Center" Margin="0,0,3,0"/>
+                                    <Button Command="{Binding SetStampRotationCommand}" CommandParameter="-12" Content="-12°" Padding="4,2" FontSize="10" Margin="0,0,2,0"/>
+                                    <Button Command="{Binding SetStampRotationCommand}" CommandParameter="0" Content="0°" Padding="4,2" FontSize="10" Margin="0,0,2,0"/>
+                                    <Button Command="{Binding SetStampRotationCommand}" CommandParameter="12" Content="+12°" Padding="4,2" FontSize="10" Margin="0,0,8,0"/>
+
+                                    <TextBlock Text="Largura:" FontSize="11" VerticalAlignment="Center" Margin="0,0,3,0"/>
+                                    <Slider Width="80" Minimum="60" Maximum="450" Value="{Binding StampWidth}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+
+                                    <TextBlock Text="Opacidade:" FontSize="11" VerticalAlignment="Center" Margin="0,0,3,0"/>
+                                    <Slider Width="60" Minimum="0.4" Maximum="1.0" Value="{Binding StampOpacity}" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </Border>
+
+                    <!-- Área Central: Imagem da Página + Canvas do Carimbo -->
+                    <Border Grid.Row="1" Background="#E5E7EB" CornerRadius="8" Padding="10" ClipToBounds="True">
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                            <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <!-- Imagem Renderizada da Página do PDF -->
+                                <Image Source="{Binding StampEditorPageImage}"
+                                       Width="{Binding CanvasRenderWidth}"
+                                       Height="{Binding CanvasRenderHeight}"
+                                       Stretch="Fill"/>
+
+                                <!-- Canvas Interativo Sobreposto à Página -->
+                                <Canvas x:Name="StampCanvas"
+                                        Width="{Binding CanvasRenderWidth}"
+                                        Height="{Binding CanvasRenderHeight}"
+                                        Background="Transparent"
+                                        ClipToBounds="True">
+
+                                    <!-- Carimbo Interativo Arrastável e Redimensionável -->
+                                    <Border Canvas.Left="{Binding StampX}"
+                                            Canvas.Top="{Binding StampY}"
+                                            Width="{Binding StampWidth}"
+                                            Height="{Binding StampHeight}"
+                                            BorderThickness="1.5"
+                                            BorderBrush="#2563EB"
+                                            CornerRadius="4"
+                                            Background="#102563EB"
+                                            Cursor="SizeAll"
+                                            MouseLeftButtonDown="Stamp_MouseLeftButtonDown"
+                                            MouseMove="Stamp_MouseMove"
+                                            MouseLeftButtonUp="Stamp_MouseLeftButtonUp">
+
+                                        <Grid>
+                                            <!-- Imagem do Carimbo Escolhido -->
+                                            <Image Source="{Binding CurrentStampPreviewImage}"
+                                                   Stretch="Fill"
+                                                   Opacity="{Binding StampOpacity}">
+                                                <Image.RenderTransform>
+                                                    <RotateTransform Angle="{Binding StampRotation}"
+                                                                     CenterX="{Binding StampHalfWidth}"
+                                                                     CenterY="{Binding StampHalfHeight}"/>
+                                                </Image.RenderTransform>
+                                            </Image>
+
+                                            <!-- Alça Canto Superior Esquerdo -->
+                                            <Border Width="10" Height="10" Background="#2563EB" BorderBrush="White" BorderThickness="1.5" CornerRadius="2"
+                                                    HorizontalAlignment="Left" VerticalAlignment="Top" Margin="-5,-5,0,0"/>
+
+                                            <!-- Alça Canto Superior Direito -->
+                                            <Border Width="10" Height="10" Background="#2563EB" BorderBrush="White" BorderThickness="1.5" CornerRadius="2"
+                                                    HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,-5,-5,0"/>
+
+                                            <!-- Alça Canto Inferior Esquerdo -->
+                                            <Border Width="10" Height="10" Background="#2563EB" BorderBrush="White" BorderThickness="1.5" CornerRadius="2"
+                                                    HorizontalAlignment="Left" VerticalAlignment="Bottom" Margin="-5,0,0,-5"/>
+
+                                            <!-- Alça Principal de Redimensionamento (Canto Inferior Direito) -->
+                                            <Border Width="14" Height="14" Background="#DC2626" BorderBrush="White" BorderThickness="2" CornerRadius="3"
+                                                    HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,-7,-7"
+                                                    Cursor="SizeNWSE"
+                                                    ToolTip="Arraste esta alça vermelha para redimensionar o carimbo"
+                                                    MouseLeftButtonDown="ResizeHandle_MouseLeftButtonDown"
+                                                    MouseMove="ResizeHandle_MouseMove"
+                                                    MouseLeftButtonUp="ResizeHandle_MouseLeftButtonUp"/>
+                                        </Grid>
+                                    </Border>
+                                </Canvas>
+                            </Grid>
+                        </ScrollViewer>
+                    </Border>
+
+                    <!-- Barra Inferior de Dicas -->
+                    <Grid Grid.Row="2" Margin="0,8,0,0">
+                        <TextBlock Text="💡 Clique e arraste o carimbo para os espaços em branco da página. Arraste a alça vermelha no canto para ajustar o tamanho exato."
+                                   FontSize="11" Foreground="#6B7280" VerticalAlignment="Center"/>
+                        <TextBlock Text="O arquivo carimbado será salvo na mesma pasta com o sufixo _carimbado.pdf"
+                                   FontSize="11" Foreground="#059669" FontWeight="Medium" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                    </Grid>
                 </Grid>
             </Border>
         </Grid>

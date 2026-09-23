@@ -28,7 +28,7 @@ public interface IPdfService
     Task ProtectPdfAsync(string sourceFile, string destinationPath, string userPassword, string ownerPassword, CancellationToken ct = default);
     Task UnlockPdfAsync(string sourceFile, string destinationPath, string password, CancellationToken ct = default);
     Task SanitizeMetadataAsync(string sourceFile, string destinationPath, CancellationToken ct = default);
-    Task AddImageStampAsync(string sourceFile, string destinationPath, string imagePath, int pageIndex, double x, double y, double width, double height, CancellationToken ct = default);
+    Task AddImageStampAsync(string sourceFile, string destinationPath, string imagePath, int pageIndex, double x, double y, double width, double height, double angleDegree = 0, double opacity = 1.0, CancellationToken ct = default);
 
     // CATEGORIA D: Otimização & Engenharia de Arquivos
     Task<long> CompressPdfAsync(string sourceFile, string destinationPath, CompressionProfile profile, IProgress<double>? progress = null, CancellationToken ct = default);

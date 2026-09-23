@@ -631,7 +631,7 @@ public class PdfService : IPdfService
         }, ct);
     }
 
-    public Task AddImageStampAsync(string sourceFile, string destinationPath, string imagePath, int pageIndex, double x, double y, double width, double height, CancellationToken ct = default)
+    public Task AddImageStampAsync(string sourceFile, string destinationPath, string imagePath, int pageIndex, double x, double y, double width, double height, double angleDegree = 0, double opacity = 1.0, CancellationToken ct = default)
     {
         return Task.Run(() =>
         {
@@ -643,7 +643,21 @@ public class PdfService : IPdfService
             var page = doc.Pages[idx];
             using (var gfx = XGraphics.FromPdfPage(page, XGraphicsPdfPageOptions.Append))
             {
-                gfx.DrawImage(ximg, x, y, width, height);
+                var state = gfx.Save();
+                if (Math.Abs(angleDegree) > 0.01)
+                {
+                    // Rotaciona ao redor do centro do carimbo
+                    double centerX = x + width / 2.0;
+                    double centerY = y + height / 2.0;
+                    gfx.TranslateTransform(centerX, centerY);
+                    gfx.RotateTransform(angleDegree);
+                    gfx.DrawImage(ximg, -width / 2.0, -height / 2.0, width, height);
+                }
+                else
+                {
+                    gfx.DrawImage(ximg, x, y, width, height);
+                }
+                gfx.Restore(state);
             }
 
             SafeSaveDocument(doc, destinationPath);
