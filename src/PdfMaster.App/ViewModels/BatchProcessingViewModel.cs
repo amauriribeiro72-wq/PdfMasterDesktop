@@ -148,6 +148,45 @@ public partial class BatchProcessingViewModel : ObservableObject
     public double StampHalfWidth => StampWidth / 2.0;
     public double StampHalfHeight => StampHeight / 2.0;
 
+    // Ribbon e Navegação Superior
+    [ObservableProperty]
+    private int _selectedRibbonTab = 0; // 0: Início, 1: Editar, 2: Anotar, 3: Página, 4: Formulário, 5: Converter, 6: Proteger, 7: Ferramentas, 8: Ajuda
+
+    [ObservableProperty]
+    private bool _isSidebarOpen = true;
+
+    [ObservableProperty]
+    private string _sidebarViewMode = "Thumbnails"; // "Thumbnails" ou "Files"
+
+    // Controles de Visualização Central e Zoom
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ZoomPercentageText))]
+    private double _zoomFactor = 1.0;
+
+    public string ZoomPercentageText => $"{(int)Math.Round(ZoomFactor * 100)}%";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CurrentPageDisplay))]
+    private int _currentViewPageIndex = 0;
+
+    [ObservableProperty]
+    private BitmapSource? _currentViewPageImage;
+
+    public string CurrentPageDisplay => PageThumbnails.Count > 0 ? $"{CurrentViewPageIndex + 1} / {PageThumbnails.Count}" : "0 / 0";
+
+    // Modal de Desbloqueio e Remoção de Senha (Faturas de Cartão)
+    [ObservableProperty]
+    private bool _isUnlockModalOpen;
+
+    [ObservableProperty]
+    private string _unlockModalPassword = "";
+
+    // Seleção de Páginas na Aba Página
+    [ObservableProperty]
+    private string _pageSelectionRangeInput = "";
+
+    public string SelectedPagesCountDisplay => $"{PageThumbnails.Count(p => p.IsSelected)} / {PageThumbnails.Count}";
+
     // Categoria A: Páginas
     [ObservableProperty]
     private string _splitRangesText = "1-2, 3-5";
@@ -272,11 +311,22 @@ public partial class BatchProcessingViewModel : ObservableObject
                 });
             }
 
-            StatusMessage = $"{PageThumbnails.Count} página(s) renderizada(s) no visualizador.";
+            CurrentViewPageIndex = 0;
+            await LoadCurrentViewPageAsync();
+            OnPropertyChanged(nameof(CurrentPageDisplay));
+            OnPropertyChanged(nameof(SelectedPagesCountDisplay));
+
+            StatusMessage = $"{PageThumbnails.Count} página(s) carregada(s) no leitor.";
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Não foi possível renderizar miniaturas: {ex.Message}";
+            StatusMessage = $"Não foi possível renderizar documento: {ex.Message}";
+            if (ex.Message.Contains("senha", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("password", StringComparison.OrdinalIgnoreCase) ||
+                ex.Message.Contains("encrypted", StringComparison.OrdinalIgnoreCase))
+            {
+                OpenUnlockModal();
+            }
         }
         finally
         {
@@ -1815,6 +1865,226 @@ public partial class BatchProcessingViewModel : ObservableObject
         finally
         {
             IsBusy = false;
+        }
+    }
+
+    #endregion
+
+    #region Ribbon, Visualização Central, Desbloqueio e Leitor Padrão
+
+    [RelayCommand]
+    private void OpenUnlockModal()
+    {
+        var target = GetTargetFile();
+        if (target == null)
+        {
+            MessageBox.Show("Adicione ou selecione um arquivo PDF primeiro.", "Aviso", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+        UnlockModalPassword = "";
+        IsUnlockModalOpen = true;
+    }
+
+    [RelayCommand]
+    private void CloseUnlockModal()
+    {
+        IsUnlockModalOpen = false;
+        UnlockModalPassword = "";
+    }
+
+    [RelayCommand]
+    private async Task ConfirmUnlockModalAsync()
+    {
+        var target = GetTargetFile();
+        if (target == null) return;
+
+        if (string.IsNullOrWhiteSpace(UnlockModalPassword))
+        {
+            MessageBox.Show("Digite a senha do documento (ex: os dígitos do CPF ou data de nascimento da fatura).", "Aviso", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+
+        try
+        {
+            IsBusy = true;
+            StatusMessage = "Removendo senha e desbloqueando documento...";
+            string folder = Path.GetDirectoryName(target.FullPath)!;
+            string outPath = Path.Combine(folder, $"{Path.GetFileNameWithoutExtension(target.FullPath)}_sem_senha.pdf");
+
+            await _pdfService.UnlockPdfAsync(target.FullPath, outPath, UnlockModalPassword);
+            LastOutputFilePath = outPath;
+            StatusMessage = "Documento desbloqueado com sucesso! Arquivo sem senha salvo na mesma pasta.";
+            IsUnlockModalOpen = false;
+            NotifyCompletion(outPath);
+
+            AddFilePaths(new[] { outPath });
+            var item = Files.FirstOrDefault(f => f.FullPath.Equals(outPath, StringComparison.OrdinalIgnoreCase));
+            if (item != null) SelectedFile = item;
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Não foi possível desbloquear o documento com a senha fornecida.\n\nDetalhes: {ex.Message}", "Erro ao Desbloquear", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    [RelayCommand]
+    private void SetDefaultPdfReader()
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "ms-settings:defaultapps",
+                UseShellExecute = true
+            });
+            MessageBox.Show(
+                "A tela de 'Aplicativos Padrão' do Windows foi aberta.\n\n" +
+                "1. Procure por '.pdf' ou 'PDF Master Pro' na lista;\n" +
+                "2. Selecione 'PDF Master Pro' como o leitor padrão.\n\n" +
+                "Pronto! A partir de agora, qualquer PDF aberto no WhatsApp, E-mail ou Explorer abrirá diretamente no aplicativo.",
+                "Definir como Leitor Padrão",
+                MessageBoxButton.OK,
+                MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Abra as configurações do Windows para associar arquivos: {ex.Message}", "Aviso", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+    }
+
+    [RelayCommand]
+    private void ZoomIn()
+    {
+        ZoomFactor = Math.Min(3.0, Math.Round(ZoomFactor + 0.15, 2));
+    }
+
+    [RelayCommand]
+    private void ZoomOut()
+    {
+        ZoomFactor = Math.Max(0.3, Math.Round(ZoomFactor - 0.15, 2));
+    }
+
+    [RelayCommand]
+    private void ResetZoom()
+    {
+        ZoomFactor = 1.0;
+    }
+
+    [RelayCommand]
+    private void FitToWidth()
+    {
+        ZoomFactor = 1.35;
+    }
+
+    [RelayCommand]
+    private void FitToPage()
+    {
+        ZoomFactor = 0.9;
+    }
+
+    [RelayCommand]
+    private async Task FirstPageAsync()
+    {
+        if (CurrentViewPageIndex != 0)
+        {
+            CurrentViewPageIndex = 0;
+            await LoadCurrentViewPageAsync();
+        }
+    }
+
+    [RelayCommand]
+    private async Task PreviousPageAsync()
+    {
+        if (CurrentViewPageIndex > 0)
+        {
+            CurrentViewPageIndex--;
+            await LoadCurrentViewPageAsync();
+        }
+    }
+
+    [RelayCommand]
+    private async Task NextPageAsync()
+    {
+        if (CurrentViewPageIndex < PageThumbnails.Count - 1)
+        {
+            CurrentViewPageIndex++;
+            await LoadCurrentViewPageAsync();
+        }
+    }
+
+    [RelayCommand]
+    private async Task LastPageAsync()
+    {
+        if (PageThumbnails.Count > 0 && CurrentViewPageIndex != PageThumbnails.Count - 1)
+        {
+            CurrentViewPageIndex = PageThumbnails.Count - 1;
+            await LoadCurrentViewPageAsync();
+        }
+    }
+
+    public async Task LoadCurrentViewPageAsync()
+    {
+        if (SelectedFile == null || !File.Exists(SelectedFile.FullPath)) return;
+        try
+        {
+            int idx = Math.Clamp(CurrentViewPageIndex, 0, Math.Max(0, PageThumbnails.Count - 1));
+            var bytes = await _rendererService.RenderPageAsync(SelectedFile.FullPath, idx, 1400);
+            if (bytes.Length > 0)
+            {
+                CurrentViewPageImage = CreateBitmapSource(bytes);
+            }
+        }
+        catch { }
+    }
+
+    [RelayCommand]
+    private void ToggleSidebar()
+    {
+        IsSidebarOpen = !IsSidebarOpen;
+    }
+
+    [RelayCommand]
+    private void SetSidebarViewMode(string mode)
+    {
+        SidebarViewMode = mode;
+        IsSidebarOpen = true;
+    }
+
+    [RelayCommand]
+    private void ApplyPageSelectionRange()
+    {
+        if (string.IsNullOrWhiteSpace(PageSelectionRangeInput)) return;
+        var indices = ParsePagesToZeroBased(PageSelectionRangeInput);
+        var set = new HashSet<int>(indices);
+        foreach (var p in PageThumbnails)
+        {
+            p.IsSelected = set.Contains(p.PageIndex);
+        }
+        OnPropertyChanged(nameof(SelectedPagesCountDisplay));
+    }
+
+    [RelayCommand]
+    private void PrintDocument()
+    {
+        var target = GetTargetFile();
+        if (target == null) return;
+        try
+        {
+            var p = new ProcessStartInfo
+            {
+                FileName = target.FullPath,
+                Verb = "print",
+                UseShellExecute = true
+            };
+            Process.Start(p);
+        }
+        catch
+        {
+            OpenFileExternal(target.FullPath);
         }
     }
 

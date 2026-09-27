@@ -23,6 +23,14 @@ public partial class App : Application
         _serviceProvider = serviceCollection.BuildServiceProvider();
 
         var mainWindow = _serviceProvider.GetRequiredService<MainWindow>();
+        
+        // Abertura de arquivo via duplo clique no Windows (Explorer, WhatsApp, E-mail)
+        if (e.Args.Length > 0 && System.IO.File.Exists(e.Args[0]))
+        {
+            var mainVm = (MainWindowViewModel)mainWindow.DataContext;
+            mainVm.BatchProcessing.AddFilePaths(new[] { e.Args[0] });
+        }
+
         mainWindow.Show();
     }
 
@@ -35,8 +43,8 @@ public partial class App : Application
         services.AddSingleton<IDigitalSignatureService, WindowsSignatureService>();
 
         // ViewModels
-        services.AddTransient<MainWindowViewModel>();
-        services.AddTransient<BatchProcessingViewModel>();
+        services.AddSingleton<BatchProcessingViewModel>();
+        services.AddSingleton<MainWindowViewModel>();
 
         // Views
         services.AddTransient<MainWindow>();

@@ -10,26 +10,7 @@
         Background="{DynamicResource AppBackgroundBrush}">
 
     <Grid>
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-        </Grid.RowDefinitions>
-
-        <!-- Barra de Cabeçalho Superior -->
-        <Border Grid.Row="0" Background="{DynamicResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="0,0,0,1" Padding="20,12">
-            <Grid>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                    <TextBlock Text="📑" FontSize="20" Margin="0,0,10,0"/>
-                    <TextBlock Text="PDF Master Pro" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource TextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
-                    <Border Background="#E8F4FD" CornerRadius="4" Margin="12,0,0,0" Padding="8,2" VerticalAlignment="Center">
-                        <TextBlock Text="Desktop Edition" FontSize="11" FontWeight="SemiBold" Foreground="#0066CC"/>
-                    </Border>
-                </StackPanel>
-                <TextBlock Text="100% Offline &amp; Seguro • Windows 10/11" HorizontalAlignment="Right" VerticalAlignment="Center" FontSize="12" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
-            </Grid>
-        </Border>
-
-        <!-- Conteúdo Principal -->
-        <views:BatchProcessingView Grid.Row="1" DataContext="{Binding BatchProcessing}" />
+        <!-- Conteúdo Principal no Padrão Ribbon Desktop Suite -->
+        <views:BatchProcessingView DataContext="{Binding BatchProcessing}" />
     </Grid>
 </Window>
