@@ -747,8 +747,7 @@
                         </Border>
 
                         <!-- Tela Inicial Quando Nenhum Arquivo Está Aberto -->
-                        <Border Background="White" CornerRadius="12" Padding="40,30" MaxWidth="520"
-                                Visibility="{Binding SelectedFile, Converter={x:Static ObjectConverters.Null}}">
+                        <Border Background="White" CornerRadius="12" Padding="40,30" MaxWidth="520">
                             <Border.Style>
                                 <Style TargetType="Border">
                                     <Setter Property="Visibility" Value="Collapsed"/>
