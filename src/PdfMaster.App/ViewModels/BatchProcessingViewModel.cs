@@ -2084,7 +2084,11 @@ public partial class BatchProcessingViewModel : ObservableObject
         }
         catch
         {
-            OpenFileExternal(target.FullPath);
+            try
+            {
+                Process.Start(new ProcessStartInfo(target.FullPath) { UseShellExecute = true });
+            }
+            catch { }
         }
     }
 
